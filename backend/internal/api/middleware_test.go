@@ -1,7 +1,6 @@
 package api
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +8,7 @@ import (
 
 func TestInitTokenAuthFromEnv_MissingSecret(t *testing.T) {
 	// Missing env secret should fail fast.
-	os.Unsetenv("JWT_SECRET")
+	t.Setenv("JWT_SECRET", "")
 	err := InitTokenAuthFromEnv()
 	assert.Error(t, err)
 }

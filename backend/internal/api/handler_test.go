@@ -11,10 +11,11 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/mustafa-oezdemir/banking_go/internal/db"
-	"github.com/mustafa-oezdemir/banking_go/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/service"
 )
 
 func setupTestHandler(t *testing.T) *Handler {
@@ -44,7 +45,7 @@ func TestRegisterHandler_BadRequest(t *testing.T) {
 
 func TestRegisterHandler_Success(t *testing.T) {
 	h := setupTestHandler(t)
-	_ = InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg=")
+	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
 
 	// Use a unique email per run to avoid DB uniqueness collisions.
 	email := "testuser_" + uuid.New().String() + "@example.com"

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	_ "github.com/lib/pq"
+
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
@@ -41,10 +42,10 @@ func createTestAccount(t *testing.T, ledger *LedgerService, balance string) uuid
 	accName := "Test Account " + uuid.New().String()
 
 	// Match settlement currency so deposit/transfer validations pass.
-	settlement, err := ledger.store.Queries.GetSettlementAccount(context.Background())
+	settlement, err := ledger.store.GetSettlementAccount(context.Background())
 	require.NoError(t, err)
 
-	account, err := ledger.store.Queries.CreateAccount(context.Background(), sqlc.CreateAccountParams{
+	account, err := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
 		OwnerID:  uuid.NullUUID{Valid: false}, // No owner for test accounts
 		Name:     accName,
 		Currency: settlement.Currency, // Match settlement account currency
@@ -60,7 +61,7 @@ func createTestAccount(t *testing.T, ledger *LedgerService, balance string) uuid
 }
 
 func getAccountBalance(t *testing.T, ledger *LedgerService, accountID uuid.UUID) string {
-	balance, err := ledger.store.Queries.GetAccountBalance(context.Background(), accountID)
+	balance, err := ledger.store.GetAccountBalance(context.Background(), accountID)
 	require.NoError(t, err)
 	return balance
 }
@@ -89,16 +90,21 @@ func TestConcurrentDeposits(t *testing.T) {
 	ledger := setupTestLedger(t)
 	accountID := createTestAccount(t, ledger, "0.00")
 	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_ = ledger.Deposit(context.Background(), accountID, "100.00")
+		errCh <- ledger.Deposit(context.Background(), accountID, "100.00")
 	}()
 	go func() {
 		defer wg.Done()
-		_ = ledger.Deposit(context.Background(), accountID, "100.00")
+		errCh <- ledger.Deposit(context.Background(), accountID, "100.00")
 	}()
 	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
 	balance := getAccountBalance(t, ledger, accountID)
 	assert.Equal(t, "200.0000", balance)
 }

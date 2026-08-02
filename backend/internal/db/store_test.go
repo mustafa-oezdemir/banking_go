@@ -11,9 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Dummy sqlc.Queries for demonstration. Replace with real implementation or mocks.
-type dummyQueries struct{}
-
 func TestIsSerializationError(t *testing.T) {
 	// SQLSTATE 40001 should be classified as retryable serialization conflict.
 	pqErr := &pq.Error{Code: "40001"}

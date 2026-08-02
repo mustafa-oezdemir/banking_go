@@ -18,13 +18,14 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
+	httpSwagger "github.com/swaggo/http-swagger"
+
 	_ "github.com/mustafa-oezdemir/banking_go/docs"
 	"github.com/mustafa-oezdemir/banking_go/internal/api"
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
 	"github.com/mustafa-oezdemir/banking_go/internal/service"
-	"github.com/rs/zerolog"
-	zlog "github.com/rs/zerolog/log"
-	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 func initLogger() {
@@ -174,11 +175,11 @@ func loadEnvironment() error {
 
 	var lastErr error
 	for _, envPath := range []string{".env", "../.env"} {
-		if err := godotenv.Load(envPath); err == nil {
+		err := godotenv.Load(envPath)
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
 		}
+		lastErr = err
 	}
 	return lastErr
 }
