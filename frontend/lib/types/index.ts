@@ -15,6 +15,12 @@ export interface Account {
   created_at: string;
   owner_id: string;
   is_system: boolean;
+	available_balance: string;
+	iban?: string;
+	masked_iban: string;
+	account_type: "GIROKONTO" | "SPARKONTO" | "SETTLEMENT";
+	status: "ACTIVE" | "BLOCKED" | "CLOSED";
+	updated_at: string;
 }
 
 export interface Entry {
@@ -26,6 +32,104 @@ export interface Entry {
   transaction_id: string;
   operation_type: string;
   created_at: string;
+	payment_order_id?: string;
+	counterparty_name?: string;
+	counterparty_iban?: string;
+	purpose?: string;
+	category?: string;
+	booking_date?: string;
+	execution_date?: string;
+}
+
+export type VoPStatus = "MATCH" | "CLOSE_MATCH" | "NO_MATCH" | "OTHER";
+
+export interface VoPResult {
+	result: VoPStatus;
+	suggested_name?: string;
+	demo_notice: string;
+}
+
+export interface Payment {
+	id: string;
+	source_account_id: string;
+	beneficiary_name: string;
+	beneficiary_iban?: string;
+	masked_beneficiary_iban: string;
+	beneficiary_bic?: string;
+	amount: string;
+	currency: "EUR";
+	payment_kind: "UMBUCHUNG" | "INTERNAL" | "SEPA" | "SEPA_INSTANT";
+	schedule_type: "IMMEDIATE" | "SCHEDULED" | "STANDING";
+	purpose?: string;
+	creditor_reference?: string;
+	end_to_end_id: string;
+	requested_execution_at: string;
+	vop_result: VoPStatus;
+	vop_suggested_name?: string;
+	vop_overridden: boolean;
+	status: "DRAFT" | "AWAITING_CONFIRMATION" | "SCHEDULED" | "PROCESSING" | "BOOKED" | "FAILED" | "CANCELLED";
+	reject_code?: string;
+	failure_reason?: string;
+	ledger_transaction_id?: string;
+	created_at: string;
+	updated_at: string;
+	processed_at?: string;
+	demo: true;
+}
+
+export interface StandingOrder {
+	id: string;
+	source_account_id: string;
+	beneficiary_name: string;
+	masked_beneficiary_iban: string;
+	amount: string;
+	currency: "EUR";
+	purpose?: string;
+	transfer_type: "STANDARD" | "INSTANT";
+	frequency: "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+	start_date: string;
+	end_date?: string;
+	max_occurrences?: number;
+	occurrences_created: number;
+	next_execution_at: string;
+	status: "ACTIVE" | "PAUSED" | "CANCELLED" | "COMPLETED";
+}
+
+export interface Beneficiary {
+	id: string;
+	name: string;
+	iban: string;
+	bic?: string;
+	category?: string;
+	is_demo: boolean;
+}
+
+export interface PaymentRequest {
+	source_account_id: string;
+	beneficiary_name: string;
+	beneficiary_iban: string;
+	beneficiary_bic?: string;
+	amount: string;
+	transfer_type: "STANDARD" | "INSTANT";
+	schedule_type: "IMMEDIATE" | "SCHEDULED";
+	purpose?: string;
+	creditor_reference?: string;
+	requested_execution_at?: string;
+}
+
+export interface StandingOrderRequest {
+	source_account_id: string;
+	beneficiary_name: string;
+	beneficiary_iban: string;
+	beneficiary_bic?: string;
+	amount: string;
+	purpose?: string;
+	creditor_reference?: string;
+	transfer_type: "STANDARD" | "INSTANT";
+	frequency: "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+	start_date: string;
+	end_date?: string;
+	max_occurrences?: number;
 }
 
 export interface Transaction {

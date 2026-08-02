@@ -16,11 +16,12 @@ type AccountInput = Omit<Account, "balance"> & {
 export function formatCurrency(amount: number | string): string {
   const num = parseFloat(String(amount)) || 0;
   return (
-    CURRENCY.SYMBOL +
-    num.toLocaleString(CURRENCY.LOCALE, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
+	num.toLocaleString(CURRENCY.LOCALE, {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+		style: "currency",
+		currency: CURRENCY.CODE,
+	})
   );
 }
 
@@ -65,6 +66,7 @@ export function isValidAmount(amount: string | number): boolean {
 export function normalizeAccounts(accounts: AccountInput[]): Account[] {
   return (accounts || []).map((acc) => ({
     ...acc,
-    balance: String(acc.balance ?? 0),
+		balance: String(acc.balance ?? 0),
+		available_balance: String(acc.available_balance ?? acc.balance ?? 0),
   }));
 }

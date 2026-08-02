@@ -52,6 +52,16 @@ export const API_ENDPOINTS = {
   ENTRIES: (accountId: string) => `/accounts/${accountId}/entries`,
   RECONCILE: (accountId: string) => `/accounts/${accountId}/reconcile`,
   TRANSACTIONS: (txId: string) => `/transactions/${txId}`,
+	ACCOUNT_TRANSACTIONS: (accountId: string) => `/accounts/${accountId}/transactions`,
+	VERIFY_PAYEE: "/payees/verify",
+	PAYMENTS: "/payments",
+	PAYMENT: (paymentId: string) => `/payments/${paymentId}`,
+	CONFIRM_PAYMENT: (paymentId: string) => `/payments/${paymentId}/confirm`,
+	CANCEL_PAYMENT: (paymentId: string) => `/payments/${paymentId}/cancel`,
+	STANDING_ORDERS: "/standing-orders",
+	STANDING_ORDER: (orderId: string) => `/standing-orders/${orderId}`,
+	BENEFICIARIES: "/beneficiaries",
+	EVENTS: "/events",
   HEALTH: "/health",
 } as const;
 
@@ -60,9 +70,9 @@ export const TOAST_DURATION = 4000;
 
 // Currency settings
 export const CURRENCY = {
-  CODE: "USD",
-  SYMBOL: "$",
-  LOCALE: "en-US",
+	CODE: "EUR",
+	SYMBOL: "€",
+	LOCALE: "de-DE",
 } as const;
 
 // Local storage keys

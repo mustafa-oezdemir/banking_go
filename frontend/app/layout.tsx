@@ -4,41 +4,15 @@ import { Providers } from "@/components/Providers";
 import { Toast } from "@/components/Toast";
 
 export const metadata: Metadata = {
-  title: "Pehlione Banking | Secure Double-Entry Ledger",
-  description:
-    "Production-grade double-entry bookkeeping system with real-time account management, transfers, deposits, and comprehensive transaction tracking. Secure, responsive, and mobile-friendly financial management.",
-  icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' font-family='serif'>💲</text></svg>",
-  },
+	title: "Pehlione DemoBank | SEPA-Banking Simulation",
+	description: "Fiktive SEPA-Demo mit EUR-Konten, Empfängerprüfung, Überweisungen und Double-Entry Ledger.",
+	icons: {
+		icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23003b70'/><text x='50' y='70' text-anchor='middle' font-size='62' fill='white' font-family='sans-serif'>P</text></svg>",
+	},
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1.0,
-  maximumScale: 5.0,
-};
+export const viewport: Viewport = { width: "device-width", initialScale: 1, maximumScale: 5 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en" className="h-full antialiased" data-scroll-behavior="smooth">
-      <head>
-        <link
-          rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-          integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0"
-          crossOrigin="anonymous"
-        />
-      </head>
-      <body className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-        <Providers>
-          {children}
-          <Toast />
-        </Providers>
-      </body>
-    </html>
-  );
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+	return <html lang="de" className="h-full antialiased" data-scroll-behavior="smooth"><body className="min-h-screen"><Providers>{children}<Toast /></Providers></body></html>;
 }

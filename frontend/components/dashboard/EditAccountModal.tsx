@@ -25,7 +25,7 @@ export function EditAccountModal({
   const showToast = useToastStore((state) => state.showToast);
 
   useEffect(() => {
-    setAccountName(account?.name ?? "");
+	queueMicrotask(() => setAccountName(account?.name ?? ""));
   }, [account]);
 
   const handleSubmit = async (event: React.FormEvent) => {

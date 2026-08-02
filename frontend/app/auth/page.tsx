@@ -1,368 +1,58 @@
-/**
- * Auth Page
- * Login and registration form
- */
-
 "use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@/lib/store/authStore";
-import { useToastStore } from "@/lib/store/toastStore";
 import { login, register } from "@/lib/api";
-import { getAPIBaseURL } from "@/lib/config";
+import { useAuthStore } from "@/lib/store/authStore";
 
 export default function AuthPage() {
-  const router = useRouter();
-  const setAuthenticated = useAuthStore((state) => state.setAuthenticated);
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
-  const isHydrated = useAuthStore((state) => state.isHydrated);
-  const showToast = useToastStore((state) => state.showToast);
+	const router = useRouter();
+	const setAuthenticated = useAuthStore((state) => state.setAuthenticated);
+	const authenticated = useAuthStore((state) => state.isAuthenticated());
+	const hydrated = useAuthStore((state) => state.isHydrated);
+	const [mode, setMode] = useState<"login" | "register">("login");
+	const [loading, setLoading] = useState(false);
+	const [message, setMessage] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"login" | "register">("login");
-  const [authMessage, setAuthMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+	useEffect(() => { if (hydrated && authenticated) router.replace("/dashboard"); }, [authenticated, hydrated, router]);
 
-  useEffect(() => {
-    if (isHydrated && isAuthenticated) {
-      router.replace("/dashboard");
-    }
-  }, [isAuthenticated, isHydrated, router]);
+	const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		setLoading(true); setMessage("");
+		const data = new FormData(event.currentTarget);
+		const email = String(data.get("email") || "");
+		const password = String(data.get("password") || "");
+		try {
+			const result = mode === "login" ? await login(email, password) : await register(email, password, String(data.get("fullName") || ""));
+			if (!result.response.ok) {
+				const apiError = typeof result.data === "object" && result.data !== null && "error" in result.data ? String((result.data as { error: unknown }).error) : "Anmeldung fehlgeschlagen.";
+				throw new Error(apiError);
+			}
+			setAuthenticated(email);
+			router.replace("/dashboard");
+		} catch (error) {
+			setMessage(error instanceof Error ? error.message : "Verbindung fehlgeschlagen.");
+		} finally { setLoading(false); }
+	};
 
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setAuthMessage("");
-
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("email") as string;
-    const password = formData.get("password") as string;
-
-    try {
-      const { response, data } = await login(email, password);
-
-      if (response.ok) {
-        setAuthenticated(email);
-        showToast("Welcome back!", "Login successful", "success");
-        router.push("/dashboard");
-      } else if (response.status === 401) {
-        setAuthMessage("Invalid email or password. Please try again.");
-      } else {
-        const errorMessage =
-          typeof data === "object" &&
-          data !== null &&
-          "error" in data &&
-          typeof (data as Record<string, unknown>).error === "string"
-            ? (data as Record<string, unknown>).error
-            : "Login failed. Please try again.";
-        setAuthMessage(errorMessage as string);
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Network error. Check your connection and try again.";
-      setAuthMessage(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setAuthMessage("");
-
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("register-email") as string;
-    const password = formData.get("register-password") as string;
-
-    try {
-      const { response, data } = await register(email, password);
-
-      if (response.ok) {
-        setAuthenticated(email);
-        showToast(
-          "Account created!",
-          "Welcome to the banking system",
-          "success",
-        );
-        router.push("/dashboard");
-      } else if (response.status === 409) {
-        setAuthMessage("An account with this email already exists.");
-      } else {
-        const errorMessage =
-          typeof data === "object" &&
-          data !== null &&
-          "error" in data &&
-          typeof (data as Record<string, unknown>).error === "string"
-            ? (data as Record<string, unknown>).error
-            : "Registration failed. Please try again.";
-        setAuthMessage(errorMessage as string);
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Network error. Check your connection and try again.";
-      setAuthMessage(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (!isHydrated || isAuthenticated) {
-    return null;
-  }
-
-  return (
-    <>
-      {/* Header */}
-      <header className="bg-black/30 backdrop-blur-lg border-b border-white/10 sticky top-0 z-50">
-        <div className="container mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center space-x-2 md:space-x-3">
-          <i className="fas fa-university text-2xl md:text-3xl text-purple-400 flex-shrink-0"></i>
-          <div className="min-w-0">
-            <h1 className="text-lg md:text-xl font-bold truncate">
-              Pehlione Banking
-            </h1>
-            <p className="text-xs text-gray-400 hidden sm:block">
-              Secure banking ledger
-            </p>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className="container mx-auto px-4 md:px-6 py-8 md:py-12 max-w-md flex-1">
-        <div className="glass rounded-2xl shadow-2xl p-6 md:p-8 border border-white/20">
-          <div className="text-center mb-6 md:mb-8">
-            <i className="fas fa-university text-4xl md:text-5xl text-purple-400 mb-3 md:mb-4"></i>
-            <h2 className="text-xl md:text-2xl font-bold mb-2">
-              Pehlione Banking
-            </h2>
-            <p className="text-gray-300 text-xs md:text-sm">
-              Production-grade double-entry bookkeeping
-            </p>
-          </div>
-
-          {/* Auth Tabs */}
-          <div className="flex space-x-2 md:space-x-4 mb-5 md:mb-6">
-            <button
-              onClick={() => {
-                setActiveTab("login");
-                setAuthMessage("");
-              }}
-              className={`flex-1 py-2 md:py-2 rounded-lg font-semibold text-sm md:text-base transition ${
-                activeTab === "login" ? "auth-tab-active" : "auth-tab-inactive"
-              }`}
-            >
-              Login
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("register");
-                setAuthMessage("");
-              }}
-              className={`flex-1 py-2 md:py-2 rounded-lg font-semibold text-sm md:text-base transition ${
-                activeTab === "register"
-                  ? "auth-tab-active"
-                  : "auth-tab-inactive"
-              }`}
-            >
-              Register
-            </button>
-          </div>
-
-          {/* Login Form */}
-          {activeTab === "login" && (
-            <form onSubmit={handleLogin} className="space-y-3 md:space-y-4">
-              <div>
-                <label className="block text-xs md:text-sm font-medium mb-2">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  autoComplete="email"
-                  disabled={isLoading}
-                  className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
-                  placeholder="user@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs md:text-sm font-medium mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  name="password"
-                  required
-                  maxLength={72}
-                  autoComplete="current-password"
-                  disabled={isLoading}
-                  className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
-                  placeholder="••••••••"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 py-2 md:py-3 rounded-lg font-semibold text-sm md:text-base transition shadow-lg disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <span className="inline-block">
-                    <span className="spinner inline-block mr-2"></span>
-                    Logging in...
-                  </span>
-                ) : (
-                  <>
-                    <i className="fas fa-sign-in-alt mr-2 hidden sm:inline"></i>
-                    Login
-                  </>
-                )}
-              </button>
-            </form>
-          )}
-
-          {/* Register Form */}
-          {activeTab === "register" && (
-            <form onSubmit={handleRegister} className="space-y-3 md:space-y-4">
-              <div>
-                <label className="block text-xs md:text-sm font-medium mb-2">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  name="register-email"
-                  required
-                  autoComplete="email"
-                  disabled={isLoading}
-                  className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
-                  placeholder="user@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs md:text-sm font-medium mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  name="register-password"
-                  required
-                  minLength={15}
-                  maxLength={72}
-                  autoComplete="new-password"
-                  disabled={isLoading}
-                  className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
-                  placeholder="••••••••"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  Use at least 15 characters. Passphrases and Unicode are
-                  supported.
-                </p>
-              </div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 py-2 md:py-3 rounded-lg font-semibold text-sm md:text-base transition shadow-lg disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <span className="inline-block">
-                    <span className="spinner inline-block mr-2"></span>
-                    Creating Account...
-                  </span>
-                ) : (
-                  <>
-                    <i className="fas fa-user-plus mr-2 hidden sm:inline"></i>
-                    Create Account
-                  </>
-                )}
-              </button>
-            </form>
-          )}
-
-          {authMessage && (
-            <div className="mt-4 p-3 rounded-lg text-xs md:text-sm text-center bg-red-500/20 border border-red-500/50 text-red-200">
-              {authMessage}
-            </div>
-          )}
-        </div>
-
-        {/* Tech Stack Info */}
-        <div className="mt-6 md:mt-8 text-center text-xs md:text-sm text-gray-400">
-          <p className="mb-2">🚀 Built with Go, PostgreSQL, SQLC & JWT</p>
-          <p className="px-2">
-            Double-entry bookkeeping • Atomic transactions • Audit trail
-          </p>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <footer className="container mx-auto px-4 md:px-6 py-6 md:py-8 text-center text-xs md:text-sm text-gray-300 border-t border-white/10">
-        <div className="space-y-3">
-          {/* API Links */}
-          <p className="break-words">
-            Learn the backend API in Swagger:
-            <a
-              href={`${getAPIBaseURL()}/swagger/index.html`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-300 hover:text-blue-200 underline ml-1 md:ml-2 inline-block"
-            >
-              Open API Docs
-            </a>
-            <span className="text-gray-600"> • </span>
-            <a
-              href={`${getAPIBaseURL()}/health`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-green-300 hover:text-green-200 underline"
-            >
-              Health Check
-            </a>
-          </p>
-
-          {/* GitHub Link */}
-          <p>
-            <a
-              href="https://github.com/mustafa-oezdemir/banking_go"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center space-x-2 text-gray-300 hover:text-white transition group"
-            >
-              <i className="fab fa-github text-lg group-hover:scale-110 transition"></i>
-              <span>GitHub Repository</span>
-            </a>
-          </p>
-
-          {/* Portfolio & Backend Links */}
-          <p className="space-x-2">
-            <a
-              href="https://pehlione.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-300 hover:text-blue-200 underline inline-block"
-            >
-              Portfolio
-            </a>
-            <span className="text-gray-600">•</span>
-            <a
-              href="https://www.linkedin.com/in/mustafa-oezdemir/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-300 hover:text-blue-200 underline inline-block"
-            >
-              LinkedIn
-            </a>
-          </p>
-
-          {/* Copyright */}
-          <p className="text-gray-500 text-xs">
-            © {new Date().getFullYear()} Mustafa Özdemir. All rights reserved.
-          </p>
-        </div>
-      </footer>
-    </>
-  );
+	if (!hydrated || authenticated) return <div className="min-h-screen bg-[#eef3f7]" />;
+	return <main className="min-h-screen bg-[#eef3f7]">
+		<div className="border-b border-[#e6cf7a] bg-[#fff3cd] px-4 py-2 text-center text-xs font-semibold text-[#634c00]">Demo-Banking – kein echtes Bankkonto · Keine echten Überweisungen</div>
+		<div className="grid min-h-[calc(100vh-33px)] lg:grid-cols-[1.1fr_.9fr]">
+			<section className="hidden bg-gradient-to-br from-[#002f56] via-[#004b80] to-[#0072a8] p-12 text-white lg:flex lg:flex-col lg:justify-between">
+				<div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-xl font-bold text-[#003b70]">P</div><div><h1 className="text-xl font-bold">Pehlione DemoBank</h1><p className="text-xs text-blue-100">SEPA-Banking sicher simuliert</p></div></div>
+				<div className="max-w-xl"><p className="text-sm font-semibold uppercase tracking-[.2em] text-blue-200">Fintech-Demonstrator</p><h2 className="mt-4 text-4xl font-bold leading-tight">Deutsches Online-Banking, ohne echtes Geld.</h2><p className="mt-5 text-lg leading-8 text-blue-100">IBAN, Empfängerprüfung, Echtzeit- und Terminüberweisungen sowie doppelte Buchführung in einer geschützten Demo-Umgebung.</p><div className="mt-8 grid grid-cols-2 gap-4 text-sm"><div className="rounded-xl bg-white/10 p-4">✓ Double-Entry Ledger</div><div className="rounded-xl bg-white/10 p-4">✓ Verification of Payee</div><div className="rounded-xl bg-white/10 p-4">✓ EUR & Demo-IBAN</div><div className="rounded-xl bg-white/10 p-4">✓ Keine Bankanbindung</div></div></div>
+				<p className="text-xs text-blue-200">Keine BaFin-Zulassung · Kein PSD2-Dienst · Nur Simulation</p>
+			</section>
+			<section className="flex items-center justify-center p-5 md:p-10">
+				<div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-xl md:p-9">
+					<div className="mb-7 lg:hidden"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#003b70] font-bold text-white">P</div><h1 className="font-bold text-[#003b70]">Pehlione DemoBank</h1></div></div>
+					<h2 className="text-2xl font-bold">{mode === "login" ? "Willkommen zurück" : "Demo-Zugang erstellen"}</h2><p className="mt-2 text-sm text-slate-500">{mode === "login" ? "Melden Sie sich im Demo-Online-Banking an." : "Alle erstellten Konten und Daten sind fiktiv."}</p>
+					<div className="mt-6 grid grid-cols-2 rounded-lg bg-slate-100 p-1"><button onClick={() => { setMode("login"); setMessage(""); }} className={`rounded-md py-2 text-sm font-semibold ${mode === "login" ? "bg-white text-[#003b70] shadow-sm" : "text-slate-500"}`}>Anmelden</button><button onClick={() => { setMode("register"); setMessage(""); }} className={`rounded-md py-2 text-sm font-semibold ${mode === "register" ? "bg-white text-[#003b70] shadow-sm" : "text-slate-500"}`}>Registrieren</button></div>
+					<form onSubmit={submit} className="mt-6 space-y-5">{mode === "register" && <label className="block"><span className="mb-2 block text-sm font-semibold">Vollständiger Name</span><input name="fullName" required maxLength={140} autoComplete="name" className="bank-input" placeholder="Anna Beispiel" /></label>}<label className="block"><span className="mb-2 block text-sm font-semibold">E-Mail-Adresse</span><input name="email" required type="email" autoComplete="email" className="bank-input" placeholder="name@beispiel.de" /></label><label className="block"><span className="mb-2 block text-sm font-semibold">Passwort</span><input name="password" required type="password" minLength={mode === "register" ? 15 : undefined} maxLength={72} autoComplete={mode === "login" ? "current-password" : "new-password"} className="bank-input" /><span className="mt-1 block text-xs text-slate-400">{mode === "register" ? "Mindestens 15 Zeichen." : "Ihre Demo-Zugangsdaten."}</span></label>{message && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{message}</div>}<button disabled={loading} className="bank-primary w-full">{loading ? "Bitte warten…" : mode === "login" ? "Sicher anmelden" : "Demo-Zugang erstellen"}</button></form>
+					<div className="mt-6 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Dies ist kein echtes Bankkonto. Verwenden Sie keine realen Bankdaten oder Passwörter.</div>
+				</div>
+			</section>
+		</div>
+	</main>;
 }

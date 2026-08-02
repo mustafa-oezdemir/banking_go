@@ -7,8 +7,8 @@ const contentSecurityPolicyDirectives = [
   "frame-ancestors 'none'",
   "object-src 'none'",
   "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
-  "font-src 'self' data: https://cdnjs.cloudflare.com",
+	"style-src 'self' 'unsafe-inline'",
+	"font-src 'self' data:",
   "img-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
@@ -83,6 +83,34 @@ const nextConfig: NextConfig = {
           source: "/transactions/:path*",
           destination: `${apiBaseUrl}/transactions/:path*`,
         },
+		{
+			source: "/payments/:path*",
+			destination: `${apiBaseUrl}/payments/:path*`,
+		},
+		{
+			source: "/payments",
+			destination: `${apiBaseUrl}/payments`,
+		},
+		{
+			source: "/payees/:path*",
+			destination: `${apiBaseUrl}/payees/:path*`,
+		},
+		{
+			source: "/standing-orders/:path*",
+			destination: `${apiBaseUrl}/standing-orders/:path*`,
+		},
+		{
+			source: "/standing-orders",
+			destination: `${apiBaseUrl}/standing-orders`,
+		},
+		{
+			source: "/beneficiaries",
+			destination: `${apiBaseUrl}/beneficiaries`,
+		},
+		{
+			source: "/events",
+			destination: `${apiBaseUrl}/events`,
+		},
         // Proxy swagger docs to Go backend
         {
           source: "/swagger/:path*",

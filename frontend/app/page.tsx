@@ -16,10 +16,10 @@ export default function Page() {
   }, [isHydrated, isAuthenticated, router]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+		<div className="min-h-screen bg-[#f3f5f7] flex items-center justify-center">
       <div className="text-center">
         <div className="spinner mx-auto mb-4"></div>
-        <p className="text-gray-400">Loading...</p>
+				<p className="text-slate-500">Demo-Banking wird geladen…</p>
       </div>
     </div>
   );

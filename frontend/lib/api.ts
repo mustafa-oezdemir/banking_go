@@ -12,6 +12,12 @@ import type {
   ReconcileResponse,
   RegisterResponse,
   SessionResponse,
+	Payment,
+	PaymentRequest,
+	StandingOrder,
+	StandingOrderRequest,
+	Beneficiary,
+	VoPResult,
 } from "@/lib/types";
 
 /**
@@ -81,10 +87,11 @@ export async function request<T>(
 export async function register(
   email: string,
   password: string,
+	fullName?: string,
 ): Promise<ApiResponse<RegisterResponse>> {
   return request<RegisterResponse>(API_ENDPOINTS.REGISTER, {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+	body: JSON.stringify({ email, password, full_name: fullName }),
   });
 }
 
@@ -139,7 +146,7 @@ export async function createAccount(
 ): Promise<ApiResponse<Account>> {
   return request<Account>(API_ENDPOINTS.ACCOUNTS, {
     method: "POST",
-    body: JSON.stringify({ name, currency: "USD" }),
+	body: JSON.stringify({ name, currency: "EUR" }),
   });
 }
 
@@ -176,7 +183,7 @@ export async function deposit(
 ): Promise<ApiResponse<MessageResponse>> {
   return request<MessageResponse>(API_ENDPOINTS.DEPOSIT(accountId), {
     method: "POST",
-    body: JSON.stringify({ amount: amount.toString(), currency: "USD" }),
+	body: JSON.stringify({ amount: amount.toString(), currency: "EUR" }),
   });
 }
 
@@ -189,7 +196,7 @@ export async function withdraw(
 ): Promise<ApiResponse<MessageResponse>> {
   return request<MessageResponse>(API_ENDPOINTS.WITHDRAW(accountId), {
     method: "POST",
-    body: JSON.stringify({ amount: amount.toString(), currency: "USD" }),
+	body: JSON.stringify({ amount: amount.toString(), currency: "EUR" }),
   });
 }
 
@@ -207,7 +214,7 @@ export async function transfer(
       from_id: fromAccountId,
       to_id: toAccountId,
       amount: amount.toString(),
-      currency: "USD",
+		currency: "EUR",
     }),
   });
 }
@@ -237,4 +244,64 @@ export async function getTransaction(
   txId: string,
 ): Promise<ApiResponse<Entry[]>> {
   return request<Entry[]>(API_ENDPOINTS.TRANSACTIONS(txId));
+}
+
+export async function getAccountTransactions(accountId: string): Promise<ApiResponse<Entry[]>> {
+	return request<Entry[]>(API_ENDPOINTS.ACCOUNT_TRANSACTIONS(accountId));
+}
+
+export async function verifyPayee(name: string, iban: string): Promise<ApiResponse<VoPResult>> {
+	return request<VoPResult>(API_ENDPOINTS.VERIFY_PAYEE, {
+		method: "POST",
+		body: JSON.stringify({ name, iban }),
+	});
+}
+
+export async function createPayment(input: PaymentRequest, idempotencyKey: string): Promise<ApiResponse<Payment>> {
+	return request<Payment>(API_ENDPOINTS.PAYMENTS, {
+		method: "POST",
+		headers: { "Idempotency-Key": idempotencyKey },
+		body: JSON.stringify(input),
+	});
+}
+
+export async function getPayments(): Promise<ApiResponse<Payment[]>> {
+	return request<Payment[]>(API_ENDPOINTS.PAYMENTS);
+}
+
+export async function confirmPayment(paymentId: string, acceptVoPMismatch: boolean): Promise<ApiResponse<Payment>> {
+	return request<Payment>(API_ENDPOINTS.CONFIRM_PAYMENT(paymentId), {
+		method: "POST",
+		body: JSON.stringify({ accept_vop_mismatch: acceptVoPMismatch, confirm_demo: true }),
+	});
+}
+
+export async function cancelPayment(paymentId: string): Promise<ApiResponse<Payment>> {
+	return request<Payment>(API_ENDPOINTS.CANCEL_PAYMENT(paymentId), { method: "POST" });
+}
+
+export async function getStandingOrders(): Promise<ApiResponse<StandingOrder[]>> {
+	return request<StandingOrder[]>(API_ENDPOINTS.STANDING_ORDERS);
+}
+
+export async function createStandingOrder(input: StandingOrderRequest): Promise<ApiResponse<StandingOrder>> {
+	return request<StandingOrder>(API_ENDPOINTS.STANDING_ORDERS, {
+		method: "POST",
+		body: JSON.stringify(input),
+	});
+}
+
+export async function updateStandingOrder(orderId: string, input: { amount: string; purpose?: string; status: "ACTIVE" | "PAUSED"; end_date?: string; max_occurrences?: number }): Promise<ApiResponse<StandingOrder>> {
+	return request<StandingOrder>(API_ENDPOINTS.STANDING_ORDER(orderId), {
+		method: "PATCH",
+		body: JSON.stringify(input),
+	});
+}
+
+export async function deleteStandingOrder(orderId: string): Promise<ApiResponse<StandingOrder>> {
+	return request<StandingOrder>(API_ENDPOINTS.STANDING_ORDER(orderId), { method: "DELETE" });
+}
+
+export async function getBeneficiaries(): Promise<ApiResponse<Beneficiary[]>> {
+	return request<Beneficiary[]>(API_ENDPOINTS.BENEFICIARIES);
 }
