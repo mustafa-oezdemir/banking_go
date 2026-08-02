@@ -75,7 +75,7 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o ledger ./cmd/main.go
 
       - name: Upload backend artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ledger-linux-amd64
           path: backend/ledger
