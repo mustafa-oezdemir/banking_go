@@ -1,6 +1,8 @@
-module github.com/mustafa-oezdemir/banking_go
+module github.com/PaulBabatuyi/Double-Entry-Bank-Go
 
-go 1.24.0
+go 1.26.4
+
+toolchain go1.26.4
 
 require (
 	github.com/go-chi/chi/v5 v5.2.5
