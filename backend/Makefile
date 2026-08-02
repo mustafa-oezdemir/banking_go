@@ -1,7 +1,7 @@
 .PHONY: postgres createdb migrate-up migrate-down migrate-up-local migrate-down-local migrate-up-docker migrate-down-docker sqlc test server lint coverage ci-test docker-build docker-up docker-down clean help
 
-DB_URL_DOCKER=postgresql://root:secret@127.0.0.1:5433/simple_ledger?sslmode=disable
-DB_URL_LOCAL=postgresql://root:secret@127.0.0.1:5432/simple_ledger?sslmode=disable
+DB_URL_DOCKER=postgresql: 
+DB_URL_LOCAL=postgresql:
 COMPOSE=docker compose -f ../docker-compose.yml --env-file ../.env
 
 postgres:

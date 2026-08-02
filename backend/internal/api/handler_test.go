@@ -9,10 +9,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/internal/db"
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/internal/service"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

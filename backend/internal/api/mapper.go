@@ -1,6 +1,6 @@
 package api
 
-import "github.com/PaulBabatuyi/Double-Entry-Bank-Go/postgres/sqlc"
+import "github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 
 func toAccountResponse(acc sqlc.Account) AccountResponse {
 	var ownerID *string

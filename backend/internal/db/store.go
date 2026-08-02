@@ -10,7 +10,7 @@ import (
 
 	"github.com/lib/pq"
 
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/postgres/sqlc"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 // Store wraps generated queries and transaction helpers.

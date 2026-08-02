@@ -14,9 +14,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/internal/db"
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/internal/service"
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/postgres/sqlc"
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/service"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 // Handler serves HTTP requests backed by the ledger and store layers.

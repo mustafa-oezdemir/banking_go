@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/internal/db"
-	"github.com/PaulBabatuyi/Double-Entry-Bank-Go/postgres/sqlc"
 	_ "github.com/lib/pq"
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 // setupTestLedger and helpers would be implemented to provide a testable LedgerService and test DB.
