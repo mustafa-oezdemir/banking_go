@@ -166,6 +166,12 @@ func envOrDefault(key, fallback string) string {
 }
 
 func loadEnvironment() error {
+	// Render injects configuration as environment variables. A .env file is a
+	// local-development convenience and is intentionally absent in production.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("RENDER")), "true") {
+		return nil
+	}
+
 	var lastErr error
 	for _, envPath := range []string{".env", "../.env"} {
 		if err := godotenv.Load(envPath); err == nil {
@@ -184,7 +190,7 @@ func main() {
 	initLogger()
 
 	if err := loadEnvironment(); err != nil {
-		zlog.Info().Err(err).Msg("No .env file found – using system environment")
+		zlog.Info().Err(err).Msg("No .env file found; using system environment")
 	}
 
 	if err := api.InitTokenAuthFromEnv(); err != nil {

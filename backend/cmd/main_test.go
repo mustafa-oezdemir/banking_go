@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestLoadEnvironmentSkipsDotEnvOnRender(t *testing.T) {
+	t.Setenv("RENDER", "true")
+
+	if err := loadEnvironment(); err != nil {
+		t.Fatalf("loadEnvironment() on Render returned an error: %v", err)
+	}
+}
+
 func TestResolveDBURLFromParts(t *testing.T) {
 	t.Setenv("DB_HOST", "localhost")
 	t.Setenv("DB_PORT", "5433")
