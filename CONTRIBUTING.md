@@ -1,4 +1,4 @@
-# Contributing to Double-Entry Bank Ledger
+# Contributing to Banking Go
 
 Thank you for considering contributing to this project! This document outlines the development workflow, CI/CD pipeline, and contribution guidelines.
 
@@ -16,7 +16,8 @@ Thank you for considering contributing to this project! This document outlines t
 
 ### Prerequisites
 
-- **Go 1.23+**
+- **Go 1.24+**
+- **Node.js 22+** and **Corepack/Yarn 1.22**
 - **Docker & Docker Compose**
 - **golang-migrate**: `go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest`
 - **sqlc**: `go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest`
@@ -26,8 +27,8 @@ Thank you for considering contributing to this project! This document outlines t
 
 ```bash
 # Clone the repository
-git clone https://github.com/PaulBabatuyi/double-entry-bank-Go.git
-cd double-entry-bank-Go
+git clone https://github.com/mustafa-oezdemir/banking_go.git
+cd banking_go
 
 # Copy environment template
 cp .env.example .env
@@ -48,6 +49,19 @@ make sqlc
 
 # Run tests
 make test
+
+# Check the frontend
+cd ../frontend
+corepack enable
+yarn install --frozen-lockfile
+yarn type-check
+yarn build
+```
+
+On Windows, the complete local stack can be started from the repository root with:
+
+```powershell
+.\start.ps1
 ```
 
 ## Development Workflow
@@ -65,8 +79,8 @@ git checkout -b fix/bug-description
 - Write code following [Code Standards](#code-standards)
 - Add tests for new functionality
 - Update documentation if needed
-- Run linter locally: `make lint`
-- Run tests locally: `make test`
+- Run backend lint and tests from `backend/`: `make lint` and `make test`
+- Run frontend checks from `frontend/`: `yarn lint`, `yarn type-check`, and `yarn build`
 
 ### 3. Commit Your Changes
 
@@ -108,33 +122,28 @@ Then create a Pull Request on GitHub with:
 
 When you create a PR, the following checks run automatically:
 
-#### 1. **Lint Check** (~2 min)
-- Runs `golangci-lint` with 30+ linters
-- Enforces code quality and style
-- Must pass before merge
+#### 1. **Lint Checks**
+- Runs `golangci-lint` in `backend/`
+- Runs ESLint in `frontend/`
+- Lint jobs currently report findings without blocking the remaining CI jobs
 
-#### 2. **Test Suite** (~3-5 min)
+#### 2. **Backend Test Suite**
 - Spins up PostgreSQL service
 - Runs migrations
-- Executes all tests with race detection
-- Generates coverage report
-- Coverage report commented on PR
+- Executes all Go tests with race detection
 
-#### 3. **Build Check** (~2 min)
-- Compiles the application
-- Ensures no build errors
-- Creates binary artifact
+#### 3. **Backend and Frontend Builds**
+- Compiles the Go backend and uploads the Linux binary artifact
+- Runs frontend TypeScript checks
+- Creates the Next.js production build
 
-#### 4. **Security Scans** (~3 min)
-- **Gosec**: Static security analysis
-- **CodeQL**: Advanced security scanning
+#### 4. **Security Scan**
+- **CodeQL** analyzes the Go backend from `backend/`
 - Results uploaded to GitHub Security tab
 
-#### 5. **PR Metadata Checks** (~1 min)
-- Validates PR title format
-- Checks PR size (warns if too large)
-- Auto-labels based on changed files
-- Detects breaking changes
+#### 5. **Container Builds**
+- Builds and publishes separate backend and frontend images to GitHub Container Registry
+- Uses `backend/Dockerfile` and `frontend/Dockerfile`
 
 ### Pipeline Stages
 
@@ -220,7 +229,7 @@ When you create a PR, the following checks run automatically:
    - Test migrations locally before pushing
 
 2. **SQL Queries**
-   - Add new queries to appropriate file in `postgres/queries/`
+   - Add new queries to the appropriate file in `backend/postgres/queries/`
    - Run `make sqlc` to generate Go code
    - Never write raw SQL in Go code
 
@@ -255,6 +264,9 @@ func TestDeposit_Success(t *testing.T) {
 ### Before Submitting PR
 
 ```bash
+# Enter the backend module
+cd backend
+
 # 1. Run linter
 make lint
 
@@ -268,7 +280,15 @@ make coverage
 # 4. Test race conditions
 go test -race ./...
 
-# 5. Manual testing (if applicable)
+# 5. Check the frontend
+cd ../frontend
+corepack enable
+yarn install --frozen-lockfile
+yarn lint
+yarn type-check
+yarn build
+
+# 6. Manual testing (if applicable)
 # Start server and test endpoints manually
 ```
 
@@ -285,8 +305,9 @@ go test -race ./...
 
 Before creating a PR, ensure:
 
-- [ ] Code follows style guidelines (passes `make lint`)
-- [ ] All tests pass (`make test`)
+- [ ] Backend follows style guidelines (`cd backend && make lint`)
+- [ ] Backend tests pass (`cd backend && make test`)
+- [ ] Frontend lint, type-check, and build checks pass
 - [ ] New tests added for new functionality
 - [ ] Documentation updated if needed
 - [ ] Commit messages follow conventional commits
@@ -327,8 +348,8 @@ This automatically:
 - ✅ Builds binaries for all platforms (Linux, macOS, Windows)
 - ✅ Generates changelog from commits
 - ✅ Creates GitHub release
-- ✅ Builds and pushes Docker image with version tag
-- ✅ Updates `latest` tag for Docker image
+- ✅ Builds and pushes separate backend and frontend Docker images
+- ✅ Updates the `latest` tags on the default branch
 
 ### Version Numbering
 
@@ -349,9 +370,9 @@ v2.0.0-rc.1 # Release candidate (prerelease)
 
 ## Getting Help
 
-- **Issues**: Open an issue for bugs or feature requests
-- **Discussions**: Use GitHub Discussions for questions
-- **Security**: Report security issues privately to maintainers
+- **Issues**: [Report bugs or request features](https://github.com/mustafa-oezdemir/banking_go/issues)
+- **Discussions**: [Ask questions in GitHub Discussions](https://github.com/mustafa-oezdemir/banking_go/discussions)
+- **Security**: [Report vulnerabilities privately](https://github.com/mustafa-oezdemir/banking_go/security/advisories/new)
 
 ## Code of Conduct
 

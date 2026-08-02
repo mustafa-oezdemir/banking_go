@@ -1,10 +1,10 @@
-# Double-Entry Bank — Next.js Frontend
+# Banking Go — Next.js Frontend
 
-A production-ready Next.js frontend for the [Double-Entry Bank Ledger API](https://github.com/PaulBabatuyi/double-entry-bank-Go). Built with TypeScript, Zustand, and Tailwind CSS v4.
+A production-ready Next.js frontend for the [Banking Go backend](https://github.com/mustafa-oezdemir/banking_go/tree/main/backend). Built with TypeScript, Zustand, and Tailwind CSS v4.
 
-**Live demo:** https://golangbank.app  
-**Backend repo:** https://github.com/PaulBabatuyi/double-entry-bank-Go  
-**API docs (Swagger):** https://golangbank.app/swagger/index.html
+- **Repository:** https://github.com/mustafa-oezdemir/banking_go
+- **Backend source:** https://github.com/mustafa-oezdemir/banking_go/tree/main/backend
+- **Local API docs:** http://localhost:8080/swagger/index.html
 
 ![Dashboard preview](public/dashboard-preview.png)
 
@@ -81,8 +81,9 @@ It was converted from a vanilla JavaScript single-page app into a typed, compone
 │       ├── authStore.ts      # Auth state (Zustand)
 │       └── toastStore.ts     # Toast notification state (Zustand)
 │
-├── middleware.ts             # Auth redirect middleware
+├── proxy.ts                  # Auth redirect proxy
 ├── next.config.ts            # API rewrites
+├── Dockerfile
 └── public/
 ```
 
@@ -92,30 +93,45 @@ It was converted from a vanilla JavaScript single-page app into a typed, compone
 
 ### Prerequisites
 
-- Node.js 18+
-- Yarn 1.x (`npm install -g yarn`)
-- A running instance of the [Go backend](https://github.com/PaulBabatuyi/double-entry-bank-Go)
+- Node.js 22+
+- Corepack with Yarn 1.22
+- A running instance of the [Go backend](https://github.com/mustafa-oezdemir/banking_go/tree/main/backend)
+
+### Recommended: run the complete stack
+
+Clone the monorepo and run the root PowerShell script:
+
+```powershell
+git clone https://github.com/mustafa-oezdemir/banking_go.git
+cd banking_go
+.\start.ps1
+```
+
+This starts the frontend, backend, and PostgreSQL. Open [http://localhost:3000](http://localhost:3000).
+
+### Frontend development mode
 
 ### 1. Install dependencies
 
 ```bash
+git clone https://github.com/mustafa-oezdemir/banking_go.git
+cd banking_go/frontend
+corepack enable
 yarn install
 ```
 
 ### 2. Configure environment
 
-```bash
-cp .env.local.example .env.local
-```
-
-Edit `.env.local` and set the backend URL:
+Create `frontend/.env.local` and set the server-side backend URL:
 
 ```env
-# Local backend
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
+BACKEND_API_URL=http://localhost:8080
+```
 
-# Or point at the hosted instance
-NEXT_PUBLIC_API_BASE_URL=https://double-entry-bank-go.onrender.com
+For a hosted backend, use its public URL instead:
+
+```env
+BACKEND_API_URL=https://your-backend-url.com
 ```
 
 ### 3. Run the development server
@@ -148,7 +164,7 @@ All HTTP calls go through `lib/api.ts`, which wraps `fetch` with:
 - `401` handling — clears the stored token and fires an `auth:logout` event that `Providers.tsx` listens to
 - JSON parsing with graceful fallback for non-JSON responses
 
-The Next.js rewrite config in `next.config.ts` proxies every backend path (`/register`, `/login`, `/accounts/*`, `/transfers`, etc.) to `NEXT_PUBLIC_API_BASE_URL`. This means the browser always talks to the same origin, and you never need to configure CORS on the backend for local development.
+The Next.js rewrite config in `next.config.ts` proxies every backend path (`/register`, `/login`, `/accounts/*`, `/transfers`, etc.) to `BACKEND_API_URL`. `NEXT_PUBLIC_API_BASE_URL` remains available as a compatibility fallback. This means the browser talks to the frontend origin while Next.js forwards API requests to the backend.
 
 Example:
 
@@ -194,7 +210,7 @@ Providers mounts → hydrate() reads localStorage
                     Token cleared → auth:logout event → redirect to /auth
 ```
 
-Route protection is enforced in two places: `middleware.ts` checks the `token` cookie server-side on every navigation, and `dashboard/page.tsx` checks the Zustand store client-side as a fallback.
+Route protection is enforced in two places: `proxy.ts` checks the `token` cookie server-side on every navigation, and `dashboard/page.tsx` checks the Zustand store client-side as a fallback.
 
 ---
 
@@ -203,31 +219,32 @@ Route protection is enforced in two places: `middleware.ts` checks the `token` c
 ### Vercel (recommended)
 
 1. Push to GitHub
-2. Import the repo in Vercel
-3. Add the environment variable:
+2. Import `https://github.com/mustafa-oezdemir/banking_go` in Vercel
+3. Set the project root directory to `frontend`
+4. Add the environment variable:
    ```
-   NEXT_PUBLIC_API_BASE_URL=https://your-backend-url.com
+   BACKEND_API_URL=https://your-backend-url.com
    ```
-4. Deploy
+5. Deploy
 
 No other configuration is required. The Next.js rewrites handle routing at the Edge.
 
 ### Other platforms
 
-Any platform that supports Node.js 18+ and the `next build && next start` command will work. Set `NEXT_PUBLIC_API_BASE_URL` to point at your backend instance.
+Any platform that supports Node.js 22+ and the `next build && next start` command will work. Set `BACKEND_API_URL` to point at your backend instance. A production container is also available through [`frontend/Dockerfile`](Dockerfile).
 
 ---
 
 ## Relation to the Backend
 
-This repository is the frontend half of a two-repo project. The Go backend implements:
+This frontend and the Go backend live together in the [`mustafa-oezdemir/banking_go`](https://github.com/mustafa-oezdemir/banking_go) monorepo. The backend implements:
 
 - Double-entry bookkeeping (every money movement writes two balanced ledger entries)
 - Atomic PostgreSQL transactions with serializable isolation and automatic retry on contention
 - JWT authentication
 - A reconciliation endpoint that verifies stored account balances against raw ledger sums
 
-The frontend is intentionally thin. If you are here to study the financial logic, start with the [backend repo](https://github.com/PaulBabatuyi/double-entry-bank-Go).
+The frontend is intentionally thin. If you are here to study the financial logic, start with the [`backend/`](../backend/) directory.
 
 ---
 

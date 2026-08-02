@@ -3,13 +3,14 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
-env:
-  GO_VERSION: '1.24'
+permissions:
+  contents: read
 
 jobs:
-  lint:
-    name: Lint
+  backend-lint:
+    name: Backend / Lint
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -19,19 +20,35 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: golangci-lint
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
           version: v1.55.2
           args: --timeout=5m
           working-directory: backend
 
-  build:
-    name: Build
+  backend-test:
+    name: Backend / Test and Build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: simple_ledger
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d simple_ledger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DB_URL: postgresql://root:secret@localhost:5432/simple_ledger?sslmode=disable
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,18 +56,62 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Build binary
-        working-directory: backend
-        run: |
-          CGO_ENABLED=0 GOOS=linux go build -o ledger cmd/main.go
+      - name: Install migration tool
+        run: go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3
 
-      - name: Upload artifact
+      - name: Run database migrations
+        working-directory: backend
+        run: migrate -path postgres/migrations -database "$TEST_DB_URL" up
+
+      - name: Run backend tests
+        working-directory: backend
+        run: go test -count=1 -race ./...
+
+      - name: Build backend binary
+        working-directory: backend
+        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o ledger ./cmd/main.go
+
+      - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ledger-binary
+          name: ledger-linux-amd64
           path: backend/ledger
           retention-days: 7
+
+  frontend-check:
+    name: Frontend / Check and Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint frontend
+        continue-on-error: true
+        run: yarn lint
+
+      - name: Type-check frontend
+        run: yarn type-check
+
+      - name: Build frontend
+        env:
+          BACKEND_API_URL: http://localhost:8080
+        run: yarn build

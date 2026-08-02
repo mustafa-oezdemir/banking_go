@@ -1,9 +1,9 @@
 # Double-Entry Bank Ledger in Go
 
-[![CI](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/ci.yml/badge.svg)](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/ci.yml)
-[![Docker](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/docker.yml/badge.svg)](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/docker.yml)
-[![CodeQL](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/codeql.yml/badge.svg)](https://github.com/PaulBabatuyi/double-entry-bank-Go/actions/workflows/codeql.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/PaulBabatuyi/double-entry-bank-Go)](https://goreportcard.com/report/github.com/PaulBabatuyi/double-entry-bank-Go)
+[![CI](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/ci.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/ci.yml)
+[![Docker](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/docker.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/docker.yml)
+[![CodeQL](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/codeql.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/mustafa-oezdemir/banking_go)](https://goreportcard.com/report/github.com/mustafa-oezdemir/banking_go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Production-focused Go backend that models bank-style money movement using strict double-entry accounting.
@@ -16,12 +16,13 @@ It demonstrates:
 - JWT auth + account-level authorization
 - API docs, health checks, and Dockerized deployment
 
-The frontend is intentionally minimal — Next.js Typescript, — so the focus stays on the Go backend. See the [frontend repo](https://github.com/PaulBabatuyi/double-entry-bank) for details.
+The frontend is intentionally minimal—Next.js and TypeScript—so the focus stays on the Go backend. Its source is included in [`frontend/`](frontend/).
 
 ## Live Demo
 
 - Frontend: https://golangbank.app
-- Frontend Repo: https://github.com/PaulBabatuyi/double-entry-bank
+- Repository: https://github.com/mustafa-oezdemir/banking_go
+- Frontend Source: https://github.com/mustafa-oezdemir/banking_go/tree/main/frontend
 - API Docs: https://golangbank.app/swagger
 - Health: https://golangbank.app/health
 
@@ -109,6 +110,7 @@ Protected (Bearer token required):
 ### Prerequisites
 
 - Go 1.24+
+- Node.js 22+ with Corepack/Yarn
 - Docker + docker compose
 - migrate CLI
 - sqlc CLI
@@ -147,8 +149,8 @@ Stop all services with:
 #### Backend only
 
 ```bash
-git clone https://github.com/PaulBabatuyi/double-entry-bank-Go.git
-cd double-entry-bank-Go
+git clone https://github.com/mustafa-oezdemir/banking_go.git
+cd banking_go
 cp .env.example .env
 # Set JWT_SECRET to at least 32 characters: openssl rand -base64 32
 cd backend
@@ -217,9 +219,12 @@ make docker-down    # Stop Docker Compose services
 
 ## Deployment
 
-Render deployment instructions are in [DEPLOYMENT.md](DEPLOYMENT.md).
+The Render backend blueprint is defined in [`render.yaml`](render.yaml). Container definitions are maintained separately in [`backend/Dockerfile`](backend/Dockerfile) and [`frontend/Dockerfile`](frontend/Dockerfile).
 
-The container serves the backend API only. The frontend is deployed separately.
+GitHub Actions publishes two images to GitHub Container Registry:
+
+- `ghcr.io/mustafa-oezdemir/banking_go-backend`
+- `ghcr.io/mustafa-oezdemir/banking_go-frontend`
 
 ## Why This Project Exists
 
