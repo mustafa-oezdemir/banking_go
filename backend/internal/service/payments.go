@@ -419,11 +419,22 @@ func samePaymentIntent(order sqlc.PaymentOrder, input CreatePaymentInput, amount
 	if err != nil {
 		return false
 	}
+	sameExecution := true
+	if input.ScheduleType == ScheduleScheduled {
+		sameExecution = order.RequestedExecutionAt.Equal(input.RequestedExecution.UTC())
+	}
+	wantsInstant := input.TransferType == PaymentInstant
+	isInstant := order.PaymentKind == "SEPA_INSTANT"
 	return order.SourceAccountID == input.SourceAccountID &&
 		order.BeneficiaryIban == input.BeneficiaryIBAN &&
 		order.BeneficiaryName == input.BeneficiaryName &&
+		order.BeneficiaryBic.String == input.BeneficiaryBIC &&
 		storedAmount.Equal(amount) &&
-		order.ScheduleType == input.ScheduleType
+		order.ScheduleType == input.ScheduleType &&
+		order.Purpose.String == input.Purpose &&
+		order.CreditorReference.String == input.CreditorReference &&
+		sameExecution &&
+		(wantsInstant == isInstant || order.PaymentKind == "INTERNAL" || order.PaymentKind == "UMBUCHUNG")
 }
 
 func markFailed(ctx context.Context, q *sqlc.Queries, order sqlc.PaymentOrder, cause error) (sqlc.PaymentOrder, error) {

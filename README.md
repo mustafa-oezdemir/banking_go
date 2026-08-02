@@ -1,256 +1,150 @@
-# Double-Entry Bank Ledger in Go
+# SEPA Demo Banking
 
-[![CI](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/ci.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/ci.yml)
-[![Docker](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/docker.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/docker.yml)
-[![CodeQL](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/codeql.yml/badge.svg)](https://github.com/mustafa-oezdemir/banking_go/actions/workflows/codeql.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/mustafa-oezdemir/banking_go)](https://goreportcard.com/report/github.com/mustafa-oezdemir/banking_go)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+A simulation-only banking application built with Go, PostgreSQL and Next.js. It models German IBANs, SEPA-style payments, instant and scheduled transfers, standing orders, Verification of Payee (VoP), SSE updates and an atomic double-entry ledger.
 
-Production-focused Go backend that models bank-style money movement using strict double-entry accounting.
+> **Demo-Banking – kein echtes Bankkonto.** This project does not connect to SEPA, PSD2, a bank, or a payment provider. It never moves real money and must not be presented as regulated, BaFin-approved, or PSD2-compliant banking software.
 
-It demonstrates:
+## What is included
 
-- Atomic transactions with PostgreSQL
-- Concurrency safety with serializable isolation + retry
-- Ledger-based reconciliation
-- JWT auth + account-level authorization
-- API docs, health checks, and Dockerized deployment
+- German-language responsive banking UI: Übersicht, Konten, Umsätze, Überweisen, Terminüberweisungen, Daueraufträge, Empfänger, Profil und Sicherheit.
+- Six-step payment wizard with explicit demo consent.
+- German-format demo IBAN generation with MOD-97 validation and a database uniqueness constraint.
+- Umbuchung, internal demo transfer, simulated SEPA, simulated SEPA Instant, scheduled payments and standing orders.
+- Demo VoP results: `MATCH`, `CLOSE_MATCH`, `NO_MATCH`, and `OTHER`; mismatch decisions are audited.
+- Payment state machine: `DRAFT`, `AWAITING_CONFIRMATION`, `SCHEDULED`, `PROCESSING`, `BOOKED`, `FAILED`, `CANCELLED`.
+- Idempotent payment creation through `Idempotency-Key`.
+- Exactly one debit and one credit for every booked payment, inside one PostgreSQL transaction.
+- External payments balance against a system settlement account.
+- PostgreSQL worker claims due jobs with `FOR UPDATE SKIP LOCKED`; a standalone worker binary is also provided.
+- SSE dashboard refresh with polling fallback.
 
-The frontend is intentionally minimal—Next.js and TypeScript—so the focus stays on the Go backend. Its source is included in [`frontend/`](frontend/).
+Demo IBANs use bank code `99999999`. They have a valid checksum for testing, but the code is intentionally not routable and must never be submitted to a real payment network.
 
-## Live Demo
-
-- Frontend: https://golangbank.app
-- Repository: https://github.com/mustafa-oezdemir/banking_go
-- Frontend Source: https://github.com/mustafa-oezdemir/banking_go/tree/main/frontend
-- API Docs: https://golangbank.app/swagger
-- Health: https://golangbank.app/health
-
-Dont forget to star and fork this project repo
-
-## Article vs README
-
-This README is intentionally concise and implementation-focused.
-
-For the full technical narrative and tutorial, read the FreeCodeCamp article: [How to Build a Bank Ledger in Golang with PostgreSQL using Double-Entry Accounting](https://www.freecodecamp.org/news/build-a-bank-ledger-in-go-with-postgresql-using-the-double-entry-accounting-principle/)
-![freecodecamp](backend/internal/public/freecodecamp.png)
-
-## Core Ledger Model
-
-Each money movement writes balanced entries into the `entries` table:
-
-- deposit: credit user account, debit settlement account
-- withdrawal: debit user account, credit settlement account
-- transfer: debit source account, credit destination account
-
-Key constraints and behaviors implemented in code:
-
-- single-sided entry rows (debit xor credit)
-- account row locking (`FOR UPDATE`) during balance-changing operations
-- serializable transactions with automatic retry on SQLSTATE `40001`
-- reconciliation query computes `SUM(credit) - SUM(debit)` as source of truth
-  ![Demo](backend/internal/public/frontend.png)
-
-## Tech Stack
-
-- Go 1.24+
-- Router: go-chi/chi
-- Database: PostgreSQL 16
-- Query layer: sqlc
-- Auth: JWT (go-chi/jwtauth)
-- Logging: zerolog
-- API docs: swaggo + http-swagger
-- Testing: Go test + testify + race detector
-- Runtime: Docker + docker-compose
-
-## API Endpoints
-
-Public:
-
-- `POST /register`
-- `POST /login`
-- `GET /health`
-- `GET /swagger/index.html`
-
-Protected (Bearer token required):
-
-- `POST /accounts`
-- `GET /accounts`
-- `GET /accounts/{id}`
-- `POST /accounts/{id}/deposit`
-- `POST /accounts/{id}/withdraw`
-- `POST /transfers`
-- `GET /accounts/{id}/entries`
-- `GET /accounts/{id}/reconcile`
-- `GET /transactions/{id}`
-  ![Backend API Endpoint; Swagger Documentation](backend/internal/public/swagger.png)
-
-## Project Structure
+## Architecture
 
 ```text
-.
-├── backend/
-│   ├── cmd/
-│   ├── internal/
-│   ├── postgres/
-│   ├── docs/
-│   ├── Dockerfile
-│   └── go.mod
-├── frontend/
-│   ├── app/
-│   ├── components/
-│   └── Dockerfile
-├── docker-compose.yml
-├── start.ps1
-└── README.md
+Browser / Next.js :3000
+        |
+        | HTTP + HttpOnly cookie + SSE
+        v
+Go / Chi API :8080 ---- in-process scheduler (free demo profile)
+        |
+        +---- optional payment-worker (paid reliable profile)
+        |
+        v
+PostgreSQL ---- payment orders + immutable double-entry entries + audit events
 ```
 
-## Local Development
+Money is represented as a JSON string at the API boundary, `decimal` in Go, and `NUMERIC` in PostgreSQL. Existing demo USD values are relabelled as EUR by migration `000005`; no real foreign-exchange conversion is claimed or performed.
 
-### Prerequisites
+## Run locally
 
-- Go 1.24+
-- Node.js 22+ with Corepack/Yarn
-- Docker + docker compose
-- migrate CLI
-- sqlc CLI
-- swag CLI (only needed when regenerating docs)
-
-Install tools:
+Requirements: Docker Desktop and Docker Compose.
 
 ```bash
-go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-go install github.com/swaggo/swag/cmd/swag@latest
-```
-
-### Run Locally
-
-#### One-command full stack (Windows)
-
-Docker Desktop açıkken repository kökünden çalıştırın:
-
-```powershell
-.\start.ps1
-```
-
-This builds and starts the complete local stack:
-
-- Frontend: http://localhost:3000 (`frontend/`)
-- Backend API: http://localhost:8080 (`backend/`)
-- PostgreSQL: `localhost:5433`
-
-Stop all services with:
-
-```powershell
-.\start.ps1 -Stop
-```
-
-#### Backend only
-
-```bash
-git clone https://github.com/mustafa-oezdemir/banking_go.git
-cd banking_go
 cp .env.example .env
-# Set JWT_SECRET to at least 32 characters: openssl rand -base64 32
+# Set a unique JWT_SECRET in .env
+docker compose up --build
+```
+
+Open [http://localhost:3000](http://localhost:3000). API health is available at [http://localhost:8080/health](http://localhost:8080/health), and Swagger UI at [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html).
+
+To load fictional, repeat-safe demo data:
+
+```env
+DEMO_SEED=true
+```
+
+Seed accounts:
+
+| User | Password |
+| --- | --- |
+| `anna.beispiel@demo.invalid` | `Demo-Banking-2026!` |
+| `max.mustermann@demo.invalid` | `Demo-Banking-2026!` |
+
+The `.invalid` domain and all names, balances and transactions are fictional. Set `DEMO_SEED=false` outside an isolated demo.
+
+## Development and verification
+
+Backend:
+
+```bash
 cd backend
-
-make postgres
-make migrate-up
-make sqlc
-make server
+go test ./...
+go vet ./...
 ```
 
-Database configuration is split into explicit fields in `.env`:
-
-- `DB_HOST` and `DB_PORT`: PostgreSQL network address
-- `DB_NAME`: database name
-- `DB_USER` and `DB_PASSWORD`: database credentials
-- `DB_SSLMODE`: PostgreSQL TLS mode
-
-`DB_URL` is still supported for managed platforms that provide a complete connection string.
-
-Open:
-
-- Swagger: http://localhost:8080/swagger/index.html
-- Health: http://localhost:8080/health
-
-## Testing
-
-Recommended (requires Docker running):
+Database integration tests use `TEST_DB_URL`. With the Compose database:
 
 ```bash
-make postgres
-make test
+TEST_DB_URL='postgresql://root:secret@localhost:5433/simple_ledger?sslmode=disable' go test ./...
 ```
 
-With coverage report:
+Frontend:
 
 ```bash
-make coverage
+cd frontend
+yarn install --frozen-lockfile
+yarn type-check
+yarn lint
+yarn build
 ```
 
-Full CI-style run including migrations:
+Regenerate sqlc and OpenAPI after changing their sources:
 
 ```bash
-make ci-test
+cd backend
+sqlc generate
+go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/main.go -o docs
 ```
 
-Environment used by tests:
+Migrations are additive and live in `backend/postgres/migrations`. The container entrypoint runs them before the API starts and exits on a non-transient migration failure.
 
-- `TEST_DB_URL` (defaults to `postgresql://root:secret@localhost:5433/simple_ledger?sslmode=disable`)
+## Payment API
 
-## Make Targets
+Authenticated additions include:
 
-```bash
-make postgres       # Start PostgreSQL container
-make migrate-up     # Apply migrations
-make migrate-down   # Rollback last migration
-make sqlc           # Regenerate sqlc query code
-make server         # Run the API server
-make test           # Run tests with race detector
-make coverage       # Generate coverage report
-make lint           # Run golangci-lint
-make ci-test        # Full test run including migrations
-make docker-build   # Build Docker image locally
-make docker-up      # Start full stack with Docker Compose
-make docker-down    # Stop Docker Compose services
-```
+- `POST /payees/verify`
+- `POST|GET /payments`
+- `GET /payments/{id}`
+- `POST /payments/{id}/confirm`
+- `POST /payments/{id}/cancel`
+- `POST|GET /standing-orders`
+- `PATCH|DELETE /standing-orders/{id}`
+- `GET /accounts/{id}/transactions`
+- `GET /beneficiaries`
+- `GET /events` (SSE)
 
-## Security
+`POST /payments` requires a unique `Idempotency-Key` header. Reusing the key with the same normalized intent returns the original order; reusing it with changed payment fields returns a conflict. Creating an order does not move funds. The client must run VoP, show the summary, and explicitly call the confirmation endpoint.
 
-The application uses HttpOnly `SameSite=Strict` session cookies, CSRF and
-origin checks, per-IP rate limits, request-size and JSON content-type limits,
-security headers, parameterized SQLC queries, and owner checks on every account
-operation. Passwords must contain at least 15 characters and are stored with
-bcrypt.
+This is intentionally a demonstration of payment orchestration, not real Strong Customer Authentication or a TAN implementation.
 
-Run the authorized local security smoke suite after starting the stack:
+## Render deployment profiles
 
-```powershell
-.\security-smoke.ps1
-```
+The default [`render.yaml`](render.yaml) keeps the existing Frankfurt region and deploys free web services plus PostgreSQL. Secrets are generated or injected by Render and are not stored in the repository.
 
-The test refuses non-loopback targets unless `-AllowRemote` is explicitly
-provided. See [`SECURITY.md`](SECURITY.md) for the security model, automated
-scans, and responsible disclosure instructions.
+### 1. Free demo
 
-## Deployment
+`ENABLE_IN_PROCESS_SCHEDULER=true` runs the scheduler inside the API. Free Render web services can sleep while idle, so scheduled payments are processed only when the service is active and **have no exact execution-time guarantee**.
 
-The Render backend blueprint is defined in [`render.yaml`](render.yaml). Container definitions are maintained separately in [`backend/Dockerfile`](backend/Dockerfile) and [`frontend/Dockerfile`](frontend/Dockerfile).
+### 2. Reliable scheduling
 
-GitHub Actions publishes two images to GitHub Container Registry:
+Use a paid background worker:
 
-- `ghcr.io/mustafa-oezdemir/banking_go-backend`
-- `ghcr.io/mustafa-oezdemir/banking_go-frontend`
+1. Merge the service in [`render.worker.example.yaml`](render.worker.example.yaml) into the Blueprint or create the equivalent worker in Render.
+2. Set `ENABLE_IN_PROCESS_SCHEDULER=false` on the web service.
+3. Keep the worker command `/usr/local/bin/payment-worker` and point `DB_URL` to the same PostgreSQL database.
+4. Keep `RUN_DB_MIGRATIONS_ON_START=false` on the worker; the web service performs migrations.
 
-## Why This Project Exists
+The sample does not silently enable a paid service. Review Render's current [free service limits](https://render.com/docs/free) before deployment: free services can spin down, free Postgres has lifecycle and backup limitations, and those conditions can change. Blueprint fields are documented in Render's [Blueprint specification](https://render.com/docs/blueprint-spec).
 
-This repository is a practical fintech-backend demonstration covering:
+## Security boundaries
 
-- correctness under concurrency
-- auditable money movement
-- clear API boundaries
-- production-minded deployment shape
+- Source-account ownership is checked on the backend for every payment.
+- Secure/HttpOnly/SameSite cookie handling, CSRF checks, CORS allowlists and endpoint rate limits remain enforced.
+- Account and payment list responses mask beneficiary IBANs; a full IBAN is returned only for owner-authorized detail flows.
+- Strict JSON decoding rejects unknown fields and reduces mass-assignment risk.
+- Stable account lock ordering and transactional writes avoid partial ledger entries and reduce deadlocks.
+- Logs and audit data must not contain JWTs, passwords, database credentials, or unmasked personal data.
 
-If you are a recruiter or reviewer, start with this README and the Swagger UI. For the full technical narrative, read the FreeCodeCamp article linked above.
+For the rules represented by this simulation, consult current official material from the [ECB on instant payments and VoP](https://www.ecb.europa.eu/paym/retail/instant_payments/html/instant_payments_regulation.en.html), the [European Payments Council on SCT](https://www.europeanpaymentscouncil.eu/what-we-do/sepa-credit-transfer), and the [Deutsche Bundesbank SEPA guidance](https://www.bundesbank.de/dynamic/action/de/aufgaben/unbarer-zahlungsverkehr/serviceangebot/sepa/613964/fragen-und-antworten-zu-sepa). This code is not legal, compliance, or operational banking advice.

@@ -544,6 +544,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/accounts/{id}/transactions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "transactions"
+                ],
+                "summary": "List and filter account transactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "CREDIT or DEBIT",
+                        "name": "direction",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Payment status",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.EntryResponse"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/accounts/{id}/withdraw": {
             "post": {
                 "security": [
@@ -625,6 +679,30 @@ const docTemplate = `{
                 }
             }
         },
+        "/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "events"
+                ],
+                "summary": "Stream payment events over SSE",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/login": {
             "post": {
                 "description": "Authenticates user with email/password and returns JWT token",
@@ -678,6 +756,262 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/payees/verify": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Compares a payee name and IBAN and returns MATCH, CLOSE_MATCH, NO_MATCH, or OTHER.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Verify a demo payee",
+                "parameters": [
+                    {
+                        "description": "Payee name and IBAN",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/service.VoPResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/payments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "List payment orders",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.PaymentResponse"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Create an idempotent payment order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Unique payment intent key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Payment details; monetary values are strings",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.PaymentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/payments/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Get a payment order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Payment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.PaymentResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/payments/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Cancel a draft or scheduled payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Payment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.PaymentResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/payments/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "payments"
+                ],
+                "summary": "Confirm and book or schedule a demo payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Payment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Demo consent and optional VoP override",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.PaymentResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
@@ -740,6 +1074,145 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/standing-orders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "standing-orders"
+                ],
+                "summary": "List recurring demo payments",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.StandingOrderResponse"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "standing-orders"
+                ],
+                "summary": "Create a recurring demo payment",
+                "parameters": [
+                    {
+                        "description": "Standing order details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.StandingOrderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.StandingOrderResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/standing-orders/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "standing-orders"
+                ],
+                "summary": "Cancel a recurring demo payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Standing order ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StandingOrderResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "standing-orders"
+                ],
+                "summary": "Update a recurring demo payment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Standing order ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Mutable standing order fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StandingOrderResponse"
                         }
                     }
                 }
@@ -891,6 +1364,12 @@ const docTemplate = `{
         "api.AccountResponse": {
             "type": "object",
             "properties": {
+                "account_type": {
+                    "type": "string"
+                },
+                "available_balance": {
+                    "type": "string"
+                },
                 "balance": {
                     "type": "string"
                 },
@@ -900,16 +1379,28 @@ const docTemplate = `{
                 "currency": {
                     "type": "string"
                 },
+                "iban": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "is_system": {
                     "type": "boolean"
                 },
+                "masked_iban": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "owner_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -918,6 +1409,18 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "account_id": {
+                    "type": "string"
+                },
+                "booking_date": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "counterparty_iban": {
+                    "type": "string"
+                },
+                "counterparty_name": {
                     "type": "string"
                 },
                 "created_at": {
@@ -932,10 +1435,19 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "execution_date": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "operation_type": {
+                    "type": "string"
+                },
+                "payment_order_id": {
+                    "type": "string"
+                },
+                "purpose": {
                     "type": "string"
                 },
                 "transaction_id": {
@@ -959,6 +1471,86 @@ const docTemplate = `{
                 }
             }
         },
+        "api.PaymentResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "beneficiary_bic": {
+                    "type": "string"
+                },
+                "beneficiary_iban": {
+                    "type": "string"
+                },
+                "beneficiary_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "creditor_reference": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "demo": {
+                    "type": "boolean"
+                },
+                "end_to_end_id": {
+                    "type": "string"
+                },
+                "failure_reason": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "ledger_transaction_id": {
+                    "type": "string"
+                },
+                "masked_beneficiary_iban": {
+                    "type": "string"
+                },
+                "payment_kind": {
+                    "type": "string"
+                },
+                "processed_at": {
+                    "type": "string"
+                },
+                "purpose": {
+                    "type": "string"
+                },
+                "reject_code": {
+                    "type": "string"
+                },
+                "requested_execution_at": {
+                    "type": "string"
+                },
+                "schedule_type": {
+                    "type": "string"
+                },
+                "source_account_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "vop_overridden": {
+                    "type": "boolean"
+                },
+                "vop_result": {
+                    "type": "string"
+                },
+                "vop_suggested_name": {
+                    "type": "string"
+                }
+            }
+        },
         "api.ReconcileResponse": {
             "type": "object",
             "properties": {
@@ -977,6 +1569,111 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.StandingOrderRequest": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "beneficiary_bic": {
+                    "type": "string"
+                },
+                "beneficiary_iban": {
+                    "type": "string"
+                },
+                "beneficiary_name": {
+                    "type": "string"
+                },
+                "creditor_reference": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "frequency": {
+                    "type": "string"
+                },
+                "max_occurrences": {
+                    "type": "integer"
+                },
+                "purpose": {
+                    "type": "string"
+                },
+                "source_account_id": {
+                    "type": "string"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "transfer_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.StandingOrderResponse": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "beneficiary_name": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "frequency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "masked_beneficiary_iban": {
+                    "type": "string"
+                },
+                "max_occurrences": {
+                    "type": "integer"
+                },
+                "next_execution_at": {
+                    "type": "string"
+                },
+                "occurrences_created": {
+                    "type": "integer"
+                },
+                "purpose": {
+                    "type": "string"
+                },
+                "source_account_id": {
+                    "type": "string"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "transfer_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.VoPResult": {
+            "type": "object",
+            "properties": {
+                "demo_notice": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "suggested_name": {
                     "type": "string"
                 }
             }

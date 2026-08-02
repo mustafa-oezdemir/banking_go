@@ -31,7 +31,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000}
+      DEMO_SEED: ${DEMO_SEED:-false}
+      ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
+      RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
     depends_on:
       db:
         condition: service_healthy

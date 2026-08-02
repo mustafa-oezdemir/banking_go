@@ -1,0 +1,20 @@
+# Optional paid scheduling profile. Merge this service into render.yaml only
+# after the web service and ledger-db have been created. Render background
+# workers are not available on the free plan.
+services:
+  - type: worker
+    name: pehlione-payment-worker
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    dockerCommand: /usr/local/bin/payment-worker
+    envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: ledger-db
+          property: connectionString
+      - key: RUN_DB_MIGRATIONS_ON_START
+        value: false

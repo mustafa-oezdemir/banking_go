@@ -19,6 +19,16 @@ import (
 )
 
 // VerifyPayee runs the simulation-only Verification of Payee check.
+// @Summary Verify a demo payee
+// @Description Compares a payee name and IBAN and returns MATCH, CLOSE_MATCH, NO_MATCH, or OTHER.
+// @Tags payments
+// @Accept json
+// @Produce json
+// @Param request body object true "Payee name and IBAN"
+// @Success 200 {object} service.VoPResult
+// @Failure 400 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /payees/verify [post]
 func (h *Handler) VerifyPayee(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -42,6 +52,17 @@ func (h *Handler) VerifyPayee(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreatePayment creates an idempotent payment draft awaiting explicit consent.
+// @Summary Create an idempotent payment order
+// @Tags payments
+// @Accept json
+// @Produce json
+// @Param Idempotency-Key header string true "Unique payment intent key"
+// @Param request body object true "Payment details; monetary values are strings"
+// @Success 201 {object} PaymentResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /payments [post]
 func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -107,6 +128,13 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, toPaymentResponse(result.Order, true))
 }
 
+// ListPayments godoc
+// @Summary List payment orders
+// @Tags payments
+// @Produce json
+// @Success 200 {array} PaymentResponse
+// @Security BearerAuth
+// @Router /payments [get]
 func (h *Handler) ListPayments(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -126,6 +154,15 @@ func (h *Handler) ListPayments(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
+// GetPayment godoc
+// @Summary Get a payment order
+// @Tags payments
+// @Produce json
+// @Param id path string true "Payment ID"
+// @Success 200 {object} PaymentResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /payments/{id} [get]
 func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	ownerID, paymentID, ok := ownerAndPathID(w, r)
 	if !ok {
@@ -139,6 +176,17 @@ func (h *Handler) GetPayment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toPaymentResponse(order, true))
 }
 
+// ConfirmPayment godoc
+// @Summary Confirm and book or schedule a demo payment
+// @Tags payments
+// @Accept json
+// @Produce json
+// @Param id path string true "Payment ID"
+// @Param request body object true "Demo consent and optional VoP override"
+// @Success 200 {object} PaymentResponse
+// @Failure 409 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /payments/{id}/confirm [post]
 func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 	ownerID, paymentID, ok := ownerAndPathID(w, r)
 	if !ok {
@@ -164,6 +212,15 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toPaymentResponse(order, true))
 }
 
+// CancelPayment godoc
+// @Summary Cancel a draft or scheduled payment
+// @Tags payments
+// @Produce json
+// @Param id path string true "Payment ID"
+// @Success 200 {object} PaymentResponse
+// @Failure 409 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /payments/{id}/cancel [post]
 func (h *Handler) CancelPayment(w http.ResponseWriter, r *http.Request) {
 	ownerID, paymentID, ok := ownerAndPathID(w, r)
 	if !ok {
@@ -177,6 +234,15 @@ func (h *Handler) CancelPayment(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toPaymentResponse(order, true))
 }
 
+// CreateStandingOrder godoc
+// @Summary Create a recurring demo payment
+// @Tags standing-orders
+// @Accept json
+// @Produce json
+// @Param request body StandingOrderRequest true "Standing order details"
+// @Success 201 {object} StandingOrderResponse
+// @Security BearerAuth
+// @Router /standing-orders [post]
 func (h *Handler) CreateStandingOrder(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -217,6 +283,13 @@ func (h *Handler) CreateStandingOrder(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, toStandingOrderResponse(order))
 }
 
+// ListStandingOrders godoc
+// @Summary List recurring demo payments
+// @Tags standing-orders
+// @Produce json
+// @Success 200 {array} StandingOrderResponse
+// @Security BearerAuth
+// @Router /standing-orders [get]
 func (h *Handler) ListStandingOrders(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -235,6 +308,16 @@ func (h *Handler) ListStandingOrders(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
+// UpdateStandingOrder godoc
+// @Summary Update a recurring demo payment
+// @Tags standing-orders
+// @Accept json
+// @Produce json
+// @Param id path string true "Standing order ID"
+// @Param request body object true "Mutable standing order fields"
+// @Success 200 {object} StandingOrderResponse
+// @Security BearerAuth
+// @Router /standing-orders/{id} [patch]
 func (h *Handler) UpdateStandingOrder(w http.ResponseWriter, r *http.Request) {
 	ownerID, orderID, ok := ownerAndPathID(w, r)
 	if !ok {
@@ -264,6 +347,14 @@ func (h *Handler) UpdateStandingOrder(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toStandingOrderResponse(order))
 }
 
+// DeleteStandingOrder godoc
+// @Summary Cancel a recurring demo payment
+// @Tags standing-orders
+// @Produce json
+// @Param id path string true "Standing order ID"
+// @Success 200 {object} StandingOrderResponse
+// @Security BearerAuth
+// @Router /standing-orders/{id} [delete]
 func (h *Handler) DeleteStandingOrder(w http.ResponseWriter, r *http.Request) {
 	ownerID, orderID, ok := ownerAndPathID(w, r)
 	if !ok {
@@ -277,6 +368,17 @@ func (h *Handler) DeleteStandingOrder(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toStandingOrderResponse(order))
 }
 
+// ListAccountTransactions godoc
+// @Summary List and filter account transactions
+// @Tags transactions
+// @Produce json
+// @Param id path string true "Account ID"
+// @Param direction query string false "CREDIT or DEBIT"
+// @Param category query string false "Category"
+// @Param status query string false "Payment status"
+// @Success 200 {array} EntryResponse
+// @Security BearerAuth
+// @Router /accounts/{id}/transactions [get]
 func (h *Handler) ListAccountTransactions(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -374,6 +476,12 @@ func (h *Handler) CreateBeneficiary(w http.ResponseWriter, r *http.Request) {
 }
 
 // Events streams durable audit events and works with EventSource cookies.
+// @Summary Stream payment events over SSE
+// @Tags events
+// @Produce text/event-stream
+// @Success 200 {string} string "SSE stream"
+// @Security BearerAuth
+// @Router /events [get]
 func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {

@@ -106,4 +106,8 @@ if [ -n "${db_url:-}" ] && [ -z "${DB_URL:-}" ] && [ -z "${DB_HOST:-}" ]; then
     export DB_URL="$db_url"
 fi
 
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 exec /usr/local/bin/ledger
