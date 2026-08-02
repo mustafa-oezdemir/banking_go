@@ -126,6 +126,28 @@ go install github.com/swaggo/swag/cmd/swag@latest
 
 ### Run Locally
 
+#### One-command full stack (Windows)
+
+Docker Desktop açıkken repository kökünden çalıştırın:
+
+```powershell
+.\start.ps1
+```
+
+This builds and starts the complete local stack:
+
+- Frontend: http://localhost:3000 (`frontend/`)
+- Backend API: http://localhost:8080 (repository root)
+- PostgreSQL: `localhost:5433`
+
+Stop all services with:
+
+```powershell
+.\start.ps1 -Stop
+```
+
+#### Backend only
+
 ```bash
 git clone https://github.com/PaulBabatuyi/double-entry-bank-Go.git
 cd double-entry-bank-Go
