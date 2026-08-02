@@ -5,19 +5,11 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
 import { useToastStore } from "@/lib/store/toastStore";
 import type { Toast } from "@/lib/store/toastStore";
 
 export function Toast() {
   const { toasts } = useToastStore();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
 
   const getIconClass = (type: string): string => {
     switch (type) {

@@ -4,6 +4,11 @@
  */
 
 import { CURRENCY } from "@/lib/config";
+import type { Account } from "@/lib/types";
+
+type AccountInput = Omit<Account, "balance"> & {
+  balance: string | number | null | undefined;
+};
 
 /**
  * Format a number as currency
@@ -55,11 +60,11 @@ export function isValidAmount(amount: string | number): boolean {
 }
 
 /**
- * Normalize account data - convert string balance to number
+ * Normalize account data so balances always use the API's string format
  */
-export function normalizeAccounts(accounts: any[]): any[] {
+export function normalizeAccounts(accounts: AccountInput[]): Account[] {
   return (accounts || []).map((acc) => ({
     ...acc,
-    balance: typeof acc.balance === "string" ? parseFloat(acc.balance) : acc.balance || 0,
+    balance: String(acc.balance ?? 0),
   }));
 }

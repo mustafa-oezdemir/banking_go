@@ -3,7 +3,7 @@
  * Handles all HTTP requests to the backend API with authentication
  */
 
-import { API_BASE_URL, API_ENDPOINTS, STORAGE_KEYS } from "@/lib/config";
+import { API_ENDPOINTS, STORAGE_KEYS } from "@/lib/config";
 import type {
   ApiResponse,
   Account,
