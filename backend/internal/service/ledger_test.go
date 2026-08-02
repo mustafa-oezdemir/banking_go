@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
-	"sync"
-	"testing"
-
 	"database/sql"
 	"os"
+	"sync"
+	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -15,6 +15,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -32,6 +33,13 @@ func setupTestLedger(t *testing.T) *LedgerService {
 	}
 	sqlDB, err := sql.Open("postgres", dbURL)
 	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err = sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		t.Skipf("PostgreSQL integration test unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	store := db.NewStore(sqlDB)
 	ledger := NewLedgerService(store)
 	return ledger
@@ -46,10 +54,9 @@ func createTestAccount(t *testing.T, ledger *LedgerService, balance string) uuid
 	require.NoError(t, err)
 
 	account, err := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
-		OwnerID:  uuid.NullUUID{Valid: false}, // No owner for test accounts
-		Name:     accName,
-		Currency: settlement.Currency, // Match settlement account currency
-		IsSystem: false,
+		OwnerID: uuid.NullUUID{Valid: false}, // No owner for test accounts
+		Name:    accName, Currency: settlement.Currency, IsSystem: false,
+		Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "ACTIVE",
 	})
 	require.NoError(t, err)
 	// Optionally pre-fund account for withdrawal/transfer scenarios.
@@ -58,6 +65,13 @@ func createTestAccount(t *testing.T, ledger *LedgerService, balance string) uuid
 		require.NoError(t, err)
 	}
 	return account.ID
+}
+
+func mustDemoIBAN(t *testing.T) string {
+	t.Helper()
+	iban, err := sepa.GenerateGermanDemoIBAN()
+	require.NoError(t, err)
+	return iban
 }
 
 func getAccountBalance(t *testing.T, ledger *LedgerService, accountID uuid.UUID) string {

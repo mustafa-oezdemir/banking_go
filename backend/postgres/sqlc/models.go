@@ -6,29 +6,121 @@ package sqlc
 
 import (
 	"database/sql"
+	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type Account struct {
-	ID        uuid.UUID     `json:"id"`
-	OwnerID   uuid.NullUUID `json:"owner_id"`
-	Name      string        `json:"name"`
-	Balance   string        `json:"balance"`
-	Currency  string        `json:"currency"`
-	IsSystem  bool          `json:"is_system"`
-	CreatedAt sql.NullTime  `json:"created_at"`
+	ID               uuid.UUID     `json:"id"`
+	OwnerID          uuid.NullUUID `json:"owner_id"`
+	Name             string        `json:"name"`
+	Balance          string        `json:"balance"`
+	Currency         string        `json:"currency"`
+	IsSystem         bool          `json:"is_system"`
+	CreatedAt        sql.NullTime  `json:"created_at"`
+	Iban             string        `json:"iban"`
+	AccountType      string        `json:"account_type"`
+	Status           string        `json:"status"`
+	AvailableBalance string        `json:"available_balance"`
+	UpdatedAt        time.Time     `json:"updated_at"`
+}
+
+type AuditEvent struct {
+	ID             int64           `json:"id"`
+	OwnerID        uuid.NullUUID   `json:"owner_id"`
+	PaymentOrderID uuid.NullUUID   `json:"payment_order_id"`
+	EventType      string          `json:"event_type"`
+	EventData      json.RawMessage `json:"event_data"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+type Beneficiary struct {
+	ID        uuid.UUID      `json:"id"`
+	OwnerID   uuid.UUID      `json:"owner_id"`
+	Name      string         `json:"name"`
+	Iban      string         `json:"iban"`
+	Bic       sql.NullString `json:"bic"`
+	Category  sql.NullString `json:"category"`
+	IsDemo    bool           `json:"is_demo"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type Entry struct {
-	ID            uuid.UUID      `json:"id"`
-	AccountID     uuid.UUID      `json:"account_id"`
-	Debit         string         `json:"debit"`
-	Credit        string         `json:"credit"`
-	TransactionID uuid.UUID      `json:"transaction_id"`
-	OperationType string         `json:"operation_type"`
-	Description   sql.NullString `json:"description"`
-	CreatedAt     sql.NullTime   `json:"created_at"`
+	ID               uuid.UUID      `json:"id"`
+	AccountID        uuid.UUID      `json:"account_id"`
+	Debit            string         `json:"debit"`
+	Credit           string         `json:"credit"`
+	TransactionID    uuid.UUID      `json:"transaction_id"`
+	OperationType    string         `json:"operation_type"`
+	Description      sql.NullString `json:"description"`
+	CreatedAt        sql.NullTime   `json:"created_at"`
+	PaymentOrderID   uuid.NullUUID  `json:"payment_order_id"`
+	CounterpartyName sql.NullString `json:"counterparty_name"`
+	CounterpartyIban sql.NullString `json:"counterparty_iban"`
+	Purpose          sql.NullString `json:"purpose"`
+	Category         sql.NullString `json:"category"`
+	BookingDate      sql.NullTime   `json:"booking_date"`
+	ExecutionDate    sql.NullTime   `json:"execution_date"`
+}
+
+type PaymentOrder struct {
+	ID                   uuid.UUID      `json:"id"`
+	OwnerID              uuid.UUID      `json:"owner_id"`
+	SourceAccountID      uuid.UUID      `json:"source_account_id"`
+	BeneficiaryAccountID uuid.NullUUID  `json:"beneficiary_account_id"`
+	StandingOrderID      uuid.NullUUID  `json:"standing_order_id"`
+	BeneficiaryName      string         `json:"beneficiary_name"`
+	BeneficiaryIban      string         `json:"beneficiary_iban"`
+	BeneficiaryBic       sql.NullString `json:"beneficiary_bic"`
+	Amount               string         `json:"amount"`
+	Currency             string         `json:"currency"`
+	PaymentKind          string         `json:"payment_kind"`
+	ScheduleType         string         `json:"schedule_type"`
+	Purpose              sql.NullString `json:"purpose"`
+	CreditorReference    sql.NullString `json:"creditor_reference"`
+	EndToEndID           string         `json:"end_to_end_id"`
+	IdempotencyKey       string         `json:"idempotency_key"`
+	RequestedExecutionAt time.Time      `json:"requested_execution_at"`
+	VopResult            string         `json:"vop_result"`
+	VopSuggestedName     sql.NullString `json:"vop_suggested_name"`
+	VopOverridden        bool           `json:"vop_overridden"`
+	VopDecisionAt        sql.NullTime   `json:"vop_decision_at"`
+	Status               string         `json:"status"`
+	RejectCode           sql.NullString `json:"reject_code"`
+	FailureReason        sql.NullString `json:"failure_reason"`
+	LedgerTransactionID  uuid.NullUUID  `json:"ledger_transaction_id"`
+	AttemptCount         int32          `json:"attempt_count"`
+	ProcessingStartedAt  sql.NullTime   `json:"processing_started_at"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+	ProcessedAt          sql.NullTime   `json:"processed_at"`
+}
+
+type StandingOrder struct {
+	ID                   uuid.UUID      `json:"id"`
+	OwnerID              uuid.UUID      `json:"owner_id"`
+	SourceAccountID      uuid.UUID      `json:"source_account_id"`
+	BeneficiaryAccountID uuid.NullUUID  `json:"beneficiary_account_id"`
+	BeneficiaryName      string         `json:"beneficiary_name"`
+	BeneficiaryIban      string         `json:"beneficiary_iban"`
+	BeneficiaryBic       sql.NullString `json:"beneficiary_bic"`
+	Amount               string         `json:"amount"`
+	Currency             string         `json:"currency"`
+	Purpose              sql.NullString `json:"purpose"`
+	CreditorReference    sql.NullString `json:"creditor_reference"`
+	TransferType         string         `json:"transfer_type"`
+	Frequency            string         `json:"frequency"`
+	StartDate            time.Time      `json:"start_date"`
+	EndDate              sql.NullTime   `json:"end_date"`
+	MaxOccurrences       sql.NullInt32  `json:"max_occurrences"`
+	OccurrencesCreated   int32          `json:"occurrences_created"`
+	NextExecutionAt      time.Time      `json:"next_execution_at"`
+	Status               string         `json:"status"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 type User struct {
@@ -36,4 +128,5 @@ type User struct {
 	Email          string       `json:"email"`
 	HashedPassword string       `json:"hashed_password"`
 	CreatedAt      sql.NullTime `json:"created_at"`
+	FullName       string       `json:"full_name"`
 }

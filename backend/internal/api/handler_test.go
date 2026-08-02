@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
@@ -33,6 +35,13 @@ func setupTestHandler(t *testing.T) *Handler {
 	}
 	sqlDB, err := sql.Open("postgres", dbURL)
 	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err = sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		t.Skipf("PostgreSQL integration test unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	store := db.NewStore(sqlDB)
 	ledger := service.NewLedgerService(store)
 	return NewHandler(ledger, store)
@@ -127,6 +136,7 @@ func createTestUserToken(t *testing.T, h *Handler) string {
 	user, err := h.store.CreateUser(t.Context(), sqlc.CreateUserParams{
 		Email:          "crud_" + uuid.New().String() + "@example.com",
 		HashedPassword: "not-used-by-this-test",
+		FullName:       "Demo Test User",
 	})
 	require.NoError(t, err)
 

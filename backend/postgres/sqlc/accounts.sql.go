@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 const accountHasEntries = `-- name: AccountHasEntries :one
@@ -27,16 +28,19 @@ func (q *Queries) AccountHasEntries(ctx context.Context, accountID uuid.UUID) (b
 }
 
 const createAccount = `-- name: CreateAccount :one
-INSERT INTO accounts (owner_id, name, currency, is_system)
-VALUES ($1, $2, $3, $4)
-RETURNING id, owner_id, name, balance, currency, is_system, created_at
+INSERT INTO accounts (owner_id, name, currency, is_system, iban, account_type, status, available_balance)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 0.0000)
+RETURNING id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at
 `
 
 type CreateAccountParams struct {
-	OwnerID  uuid.NullUUID `json:"owner_id"`
-	Name     string        `json:"name"`
-	Currency string        `json:"currency"`
-	IsSystem bool          `json:"is_system"`
+	OwnerID     uuid.NullUUID `json:"owner_id"`
+	Name        string        `json:"name"`
+	Currency    string        `json:"currency"`
+	IsSystem    bool          `json:"is_system"`
+	Iban        string        `json:"iban"`
+	AccountType string        `json:"account_type"`
+	Status      string        `json:"status"`
 }
 
 func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error) {
@@ -45,6 +49,9 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		arg.Name,
 		arg.Currency,
 		arg.IsSystem,
+		arg.Iban,
+		arg.AccountType,
+		arg.Status,
 	)
 	var i Account
 	err := row.Scan(
@@ -55,6 +62,11 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -70,7 +82,7 @@ WHERE accounts.id = $1
       FROM entries
       WHERE entries.account_id = accounts.id
   )
-RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at
+RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at, accounts.iban, accounts.account_type, accounts.status, accounts.available_balance, accounts.updated_at
 `
 
 type DeleteAccountParams struct {
@@ -89,12 +101,17 @@ func (q *Queries) DeleteAccount(ctx context.Context, arg DeleteAccountParams) (A
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, owner_id, name, balance, currency, is_system, created_at FROM accounts
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
 WHERE id = $1
 LIMIT 1
 `
@@ -110,6 +127,11 @@ func (q *Queries) GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -129,8 +151,61 @@ func (q *Queries) GetAccountBalance(ctx context.Context, accountID uuid.UUID) (s
 	return calculated_balance, err
 }
 
+const getAccountByIBAN = `-- name: GetAccountByIBAN :one
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
+WHERE iban = $1
+LIMIT 1
+`
+
+func (q *Queries) GetAccountByIBAN(ctx context.Context, iban string) (Account, error) {
+	row := q.db.QueryRowContext(ctx, getAccountByIBAN, iban)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.Balance,
+		&i.Currency,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAccountByIBANForUpdate = `-- name: GetAccountByIBANForUpdate :one
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
+WHERE iban = $1
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) GetAccountByIBANForUpdate(ctx context.Context, iban string) (Account, error) {
+	row := q.db.QueryRowContext(ctx, getAccountByIBANForUpdate, iban)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.Balance,
+		&i.Currency,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAccountForUpdate = `-- name: GetAccountForUpdate :one
-SELECT id, owner_id, name, balance, currency, is_system, created_at FROM accounts
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
 WHERE id = $1
 LIMIT 1
 FOR UPDATE
@@ -147,13 +222,18 @@ func (q *Queries) GetAccountForUpdate(ctx context.Context, id uuid.UUID) (Accoun
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getSettlementAccount = `-- name: GetSettlementAccount :one
-SELECT id, owner_id, name, balance, currency, is_system, created_at FROM accounts
-WHERE is_system = TRUE AND name = 'Settlement Account'
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
+WHERE is_system = TRUE AND account_type = 'SETTLEMENT'
 LIMIT 1
 `
 
@@ -168,13 +248,18 @@ func (q *Queries) GetSettlementAccount(ctx context.Context) (Account, error) {
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getSettlementAccountForUpdate = `-- name: GetSettlementAccountForUpdate :one
-SELECT id, owner_id, name, balance, currency, is_system, created_at FROM accounts
-WHERE is_system = TRUE AND name = 'Settlement Account'
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
+WHERE is_system = TRUE AND account_type = 'SETTLEMENT'
 LIMIT 1
 FOR UPDATE
 `
@@ -190,13 +275,18 @@ func (q *Queries) GetSettlementAccountForUpdate(ctx context.Context) (Account, e
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listAccountsByOwner = `-- name: ListAccountsByOwner :many
 
-SELECT id, owner_id, name, balance, currency, is_system, created_at FROM accounts
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
 WHERE owner_id = $1
 ORDER BY created_at DESC
 `
@@ -219,6 +309,54 @@ func (q *Queries) ListAccountsByOwner(ctx context.Context, ownerID uuid.NullUUID
 			&i.Currency,
 			&i.IsSystem,
 			&i.CreatedAt,
+			&i.Iban,
+			&i.AccountType,
+			&i.Status,
+			&i.AvailableBalance,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAccountsForUpdate = `-- name: ListAccountsForUpdate :many
+SELECT id, owner_id, name, balance, currency, is_system, created_at, iban, account_type, status, available_balance, updated_at FROM accounts
+WHERE id = ANY($1::UUID[])
+ORDER BY id
+FOR UPDATE
+`
+
+func (q *Queries) ListAccountsForUpdate(ctx context.Context, accountIds []uuid.UUID) ([]Account, error) {
+	rows, err := q.db.QueryContext(ctx, listAccountsForUpdate, pq.Array(accountIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Account
+	for rows.Next() {
+		var i Account
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Name,
+			&i.Balance,
+			&i.Currency,
+			&i.IsSystem,
+			&i.CreatedAt,
+			&i.Iban,
+			&i.AccountType,
+			&i.Status,
+			&i.AvailableBalance,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -239,7 +377,7 @@ SET name = $1
 WHERE accounts.id = $2
   AND accounts.owner_id = $3
   AND accounts.is_system = FALSE
-RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at
+RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at, accounts.iban, accounts.account_type, accounts.status, accounts.available_balance, accounts.updated_at
 `
 
 type UpdateAccountParams struct {
@@ -259,13 +397,20 @@ func (q *Queries) UpdateAccount(ctx context.Context, arg UpdateAccountParams) (A
 		&i.Currency,
 		&i.IsSystem,
 		&i.CreatedAt,
+		&i.Iban,
+		&i.AccountType,
+		&i.Status,
+		&i.AvailableBalance,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const updateAccountBalance = `-- name: UpdateAccountBalance :exec
 UPDATE accounts
-SET balance = balance + $1
+SET balance = balance + $1,
+    available_balance = available_balance + $1,
+    updated_at = CURRENT_TIMESTAMP
 WHERE id = $2
 `
 

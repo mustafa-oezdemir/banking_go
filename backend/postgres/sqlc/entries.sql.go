@@ -15,7 +15,7 @@ import (
 const createEntry = `-- name: CreateEntry :one
 INSERT INTO entries (account_id, debit, credit, transaction_id, operation_type, description)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, account_id, debit, credit, transaction_id, operation_type, description, created_at
+RETURNING id, account_id, debit, credit, transaction_id, operation_type, description, created_at, payment_order_id, counterparty_name, counterparty_iban, purpose, category, booking_date, execution_date
 `
 
 type CreateEntryParams struct {
@@ -46,12 +46,163 @@ func (q *Queries) CreateEntry(ctx context.Context, arg CreateEntryParams) (Entry
 		&i.OperationType,
 		&i.Description,
 		&i.CreatedAt,
+		&i.PaymentOrderID,
+		&i.CounterpartyName,
+		&i.CounterpartyIban,
+		&i.Purpose,
+		&i.Category,
+		&i.BookingDate,
+		&i.ExecutionDate,
 	)
 	return i, err
 }
 
+const createPaymentEntry = `-- name: CreatePaymentEntry :one
+INSERT INTO entries (
+    account_id, debit, credit, transaction_id, operation_type, description,
+    payment_order_id, counterparty_name, counterparty_iban, purpose, category,
+    booking_date, execution_date
+)
+VALUES (
+    $1, $2, $3, $4, 'transfer', $5,
+    $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11
+)
+RETURNING id, account_id, debit, credit, transaction_id, operation_type, description, created_at, payment_order_id, counterparty_name, counterparty_iban, purpose, category, booking_date, execution_date
+`
+
+type CreatePaymentEntryParams struct {
+	AccountID        uuid.UUID      `json:"account_id"`
+	Debit            string         `json:"debit"`
+	Credit           string         `json:"credit"`
+	TransactionID    uuid.UUID      `json:"transaction_id"`
+	Description      sql.NullString `json:"description"`
+	PaymentOrderID   uuid.NullUUID  `json:"payment_order_id"`
+	CounterpartyName sql.NullString `json:"counterparty_name"`
+	CounterpartyIban sql.NullString `json:"counterparty_iban"`
+	Purpose          sql.NullString `json:"purpose"`
+	Category         sql.NullString `json:"category"`
+	ExecutionDate    sql.NullTime   `json:"execution_date"`
+}
+
+func (q *Queries) CreatePaymentEntry(ctx context.Context, arg CreatePaymentEntryParams) (Entry, error) {
+	row := q.db.QueryRowContext(ctx, createPaymentEntry,
+		arg.AccountID,
+		arg.Debit,
+		arg.Credit,
+		arg.TransactionID,
+		arg.Description,
+		arg.PaymentOrderID,
+		arg.CounterpartyName,
+		arg.CounterpartyIban,
+		arg.Purpose,
+		arg.Category,
+		arg.ExecutionDate,
+	)
+	var i Entry
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Debit,
+		&i.Credit,
+		&i.TransactionID,
+		&i.OperationType,
+		&i.Description,
+		&i.CreatedAt,
+		&i.PaymentOrderID,
+		&i.CounterpartyName,
+		&i.CounterpartyIban,
+		&i.Purpose,
+		&i.Category,
+		&i.BookingDate,
+		&i.ExecutionDate,
+	)
+	return i, err
+}
+
+const listAccountTransactions = `-- name: ListAccountTransactions :many
+SELECT id, account_id, debit, credit, transaction_id, operation_type, description, created_at, payment_order_id, counterparty_name, counterparty_iban, purpose, category, booking_date, execution_date FROM entries
+WHERE account_id = $1
+  AND ($2::TEXT IS NULL OR
+       ($2 = 'INCOMING' AND credit > 0) OR
+       ($2 = 'OUTGOING' AND debit > 0))
+  AND ($3::TEXT IS NULL OR EXISTS (
+        SELECT 1 FROM payment_orders po
+        WHERE po.id = entries.payment_order_id AND po.status = $3
+      ))
+  AND ($4::TEXT IS NULL OR entries.category = $4)
+  AND ($5::TIMESTAMPTZ IS NULL OR entries.created_at >= $5)
+  AND ($6::TIMESTAMPTZ IS NULL OR entries.created_at <= $6)
+  AND ($7::NUMERIC IS NULL OR GREATEST(entries.debit, entries.credit) >= $7)
+  AND ($8::NUMERIC IS NULL OR GREATEST(entries.debit, entries.credit) <= $8)
+ORDER BY entries.created_at DESC
+LIMIT $10 OFFSET $9
+`
+
+type ListAccountTransactionsParams struct {
+	AccountID    uuid.UUID      `json:"account_id"`
+	Direction    sql.NullString `json:"direction"`
+	Status       sql.NullString `json:"status"`
+	Category     sql.NullString `json:"category"`
+	DateFrom     sql.NullTime   `json:"date_from"`
+	DateTo       sql.NullTime   `json:"date_to"`
+	MinAmount    sql.NullString `json:"min_amount"`
+	MaxAmount    sql.NullString `json:"max_amount"`
+	ResultOffset int32          `json:"result_offset"`
+	ResultLimit  int32          `json:"result_limit"`
+}
+
+func (q *Queries) ListAccountTransactions(ctx context.Context, arg ListAccountTransactionsParams) ([]Entry, error) {
+	rows, err := q.db.QueryContext(ctx, listAccountTransactions,
+		arg.AccountID,
+		arg.Direction,
+		arg.Status,
+		arg.Category,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.MinAmount,
+		arg.MaxAmount,
+		arg.ResultOffset,
+		arg.ResultLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entry
+	for rows.Next() {
+		var i Entry
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Debit,
+			&i.Credit,
+			&i.TransactionID,
+			&i.OperationType,
+			&i.Description,
+			&i.CreatedAt,
+			&i.PaymentOrderID,
+			&i.CounterpartyName,
+			&i.CounterpartyIban,
+			&i.Purpose,
+			&i.Category,
+			&i.BookingDate,
+			&i.ExecutionDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntriesByAccount = `-- name: ListEntriesByAccount :many
-SELECT id, account_id, debit, credit, transaction_id, operation_type, description, created_at FROM entries
+SELECT id, account_id, debit, credit, transaction_id, operation_type, description, created_at, payment_order_id, counterparty_name, counterparty_iban, purpose, category, booking_date, execution_date FROM entries
 WHERE account_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -81,6 +232,13 @@ func (q *Queries) ListEntriesByAccount(ctx context.Context, arg ListEntriesByAcc
 			&i.OperationType,
 			&i.Description,
 			&i.CreatedAt,
+			&i.PaymentOrderID,
+			&i.CounterpartyName,
+			&i.CounterpartyIban,
+			&i.Purpose,
+			&i.Category,
+			&i.BookingDate,
+			&i.ExecutionDate,
 		); err != nil {
 			return nil, err
 		}
@@ -96,7 +254,7 @@ func (q *Queries) ListEntriesByAccount(ctx context.Context, arg ListEntriesByAcc
 }
 
 const listEntriesByTransaction = `-- name: ListEntriesByTransaction :many
-SELECT id, account_id, debit, credit, transaction_id, operation_type, description, created_at FROM entries
+SELECT id, account_id, debit, credit, transaction_id, operation_type, description, created_at, payment_order_id, counterparty_name, counterparty_iban, purpose, category, booking_date, execution_date FROM entries
 WHERE transaction_id = $1
 ORDER BY created_at
 `
@@ -119,6 +277,13 @@ func (q *Queries) ListEntriesByTransaction(ctx context.Context, transactionID uu
 			&i.OperationType,
 			&i.Description,
 			&i.CreatedAt,
+			&i.PaymentOrderID,
+			&i.CounterpartyName,
+			&i.CounterpartyIban,
+			&i.Purpose,
+			&i.Category,
+			&i.BookingDate,
+			&i.ExecutionDate,
 		); err != nil {
 			return nil, err
 		}

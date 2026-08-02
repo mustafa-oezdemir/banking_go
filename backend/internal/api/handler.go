@@ -18,14 +18,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/internal/service"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger *service.LedgerService
-	store  *db.Store
+	ledger   *service.LedgerService
+	payments *service.PaymentService
+	store    *db.Store
 }
 
 const maxAccountNameLength = 100
@@ -61,7 +63,13 @@ func authenticatedUserID(r *http.Request) (uuid.UUID, error) {
 
 // NewHandler constructs a Handler with the required service and persistence dependencies.
 func NewHandler(ledger *service.LedgerService, store *db.Store) *Handler {
-	return &Handler{ledger: ledger, store: store}
+	return &Handler{ledger: ledger, payments: service.NewPaymentService(store, nil), store: store}
+}
+
+// NewHandlerWithPayments allows main and the standalone worker to share the
+// same payment service and in-memory SSE hub.
+func NewHandlerWithPayments(ledger *service.LedgerService, payments *service.PaymentService, store *db.Store) *Handler {
+	return &Handler{ledger: ledger, payments: payments, store: store}
 }
 
 // Register godoc
@@ -81,6 +89,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		FullName string `json:"full_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		log.Warn().Err(err).Msg("Failed to decode register request")
@@ -110,6 +119,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.CreateUser(r.Context(), sqlc.CreateUserParams{
 		Email:          email,
 		HashedPassword: string(hashed),
+		FullName:       defaultFullName(input.FullName, email),
 	})
 	if err != nil {
 		log.Error().Err(err).Str("email", email).Msg("Failed to create user")
@@ -254,12 +264,22 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Create a user-owned account in default currency.
-	acc, err := h.store.CreateAccount(r.Context(), sqlc.CreateAccountParams{
-		OwnerID:  uuid.NullUUID{UUID: userID, Valid: true},
-		Name:     name,
-		Currency: "USD",
-		IsSystem: false,
-	})
+	var acc sqlc.Account
+	for attempt := 0; attempt < 5; attempt++ {
+		iban, ibanErr := sepa.GenerateGermanDemoIBAN()
+		if ibanErr != nil {
+			err = ibanErr
+			break
+		}
+		acc, err = h.store.CreateAccount(r.Context(), sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: userID, Valid: true}, Name: name,
+			Currency: "EUR", IsSystem: false, Iban: iban,
+			AccountType: "GIROKONTO", Status: "ACTIVE",
+		})
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		log.Error().Err(err).Str("user_id", userID.String()).Str("name", name).Msg("Failed to create account")
 		respondError(w, http.StatusInternalServerError, "failed to create account")
@@ -311,7 +331,7 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 
 	response := make([]AccountResponse, len(accounts))
 	for i, acc := range accounts {
-		response[i] = toAccountResponse(acc)
+		response[i] = toAccountListResponse(acc)
 	}
 
 	respondJSON(w, http.StatusOK, response)

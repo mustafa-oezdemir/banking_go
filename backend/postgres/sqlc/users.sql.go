@@ -13,31 +13,38 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (email, hashed_password)
-VALUES ($1, $2)
-RETURNING id, email, created_at
+INSERT INTO users (email, hashed_password, full_name)
+VALUES ($1, $2, $3)
+RETURNING id, email, full_name, created_at
 `
 
 type CreateUserParams struct {
 	Email          string `json:"email"`
 	HashedPassword string `json:"hashed_password"`
+	FullName       string `json:"full_name"`
 }
 
 type CreateUserRow struct {
 	ID        uuid.UUID    `json:"id"`
 	Email     string       `json:"email"`
+	FullName  string       `json:"full_name"`
 	CreatedAt sql.NullTime `json:"created_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.HashedPassword)
+	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.HashedPassword, arg.FullName)
 	var i CreateUserRow
-	err := row.Scan(&i.ID, &i.Email, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.FullName,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, hashed_password, created_at FROM users
+SELECT id, email, hashed_password, created_at, full_name FROM users
 WHERE email = $1
 LIMIT 1
 `
@@ -50,6 +57,26 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.HashedPassword,
 		&i.CreatedAt,
+		&i.FullName,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, email, hashed_password, created_at, full_name FROM users
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.HashedPassword,
+		&i.CreatedAt,
+		&i.FullName,
 	)
 	return i, err
 }

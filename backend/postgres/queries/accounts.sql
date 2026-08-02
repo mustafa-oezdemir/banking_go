@@ -1,6 +1,6 @@
 -- name: CreateAccount :one
-INSERT INTO accounts (owner_id, name, currency, is_system)
-VALUES ($1, $2, $3, $4)
+INSERT INTO accounts (owner_id, name, currency, is_system, iban, account_type, status, available_balance)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 0.0000)
 RETURNING *;
 
 -- name: GetAccount :one
@@ -49,17 +49,36 @@ ORDER BY created_at DESC;
 
 -- name: UpdateAccountBalance :exec
 UPDATE accounts
-SET balance = balance + $1
+SET balance = balance + $1,
+    available_balance = available_balance + $1,
+    updated_at = CURRENT_TIMESTAMP
 WHERE id = $2;
+
+-- name: GetAccountByIBAN :one
+SELECT * FROM accounts
+WHERE iban = $1
+LIMIT 1;
+
+-- name: GetAccountByIBANForUpdate :one
+SELECT * FROM accounts
+WHERE iban = $1
+LIMIT 1
+FOR UPDATE;
+
+-- name: ListAccountsForUpdate :many
+SELECT * FROM accounts
+WHERE id = ANY(sqlc.arg(account_ids)::UUID[])
+ORDER BY id
+FOR UPDATE;
 
 -- name: GetSettlementAccount :one
 SELECT * FROM accounts
-WHERE is_system = TRUE AND name = 'Settlement Account'
+WHERE is_system = TRUE AND account_type = 'SETTLEMENT'
 LIMIT 1;
 
 -- name: GetSettlementAccountForUpdate :one
 SELECT * FROM accounts
-WHERE is_system = TRUE AND name = 'Settlement Account'
+WHERE is_system = TRUE AND account_type = 'SETTLEMENT'
 LIMIT 1
 FOR UPDATE; -- lock prevents concurrent transactions from reading a stale balance.
 

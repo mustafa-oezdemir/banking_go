@@ -233,9 +233,11 @@ func main() {
 
 	store := db.NewStore(dbConn)
 	ledgerSvc := service.NewLedgerService(store)
+	eventHub := service.NewEventHub()
+	paymentSvc := service.NewPaymentService(store, eventHub)
 
 	// Wire HTTP handlers with service and persistence dependencies.
-	h := api.NewHandler(ledgerSvc, store)
+	h := api.NewHandlerWithPayments(ledgerSvc, paymentSvc, store)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -251,9 +253,9 @@ func main() {
 	// CORS middleware for separate frontend deployments and local development.
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Protection"},
-		ExposedHeaders:   []string{"Link"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Protection", "Idempotency-Key", "Last-Event-ID"},
+		ExposedHeaders:   []string{"Link", "Idempotent-Replayed"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -306,9 +308,49 @@ func main() {
 		r.Post("/accounts/{id}/withdraw", h.Withdraw)
 		r.Post("/transfers", h.Transfer)
 		r.Get("/accounts/{id}/entries", h.GetEntries)
+		r.Get("/accounts/{id}/transactions", h.ListAccountTransactions)
 		r.Get("/accounts/{id}/reconcile", h.ReconcileAccount)
 		r.Get("/transactions/{id}", h.GetTransactions)
+
+		vopRateLimit := api.NewIPRateLimiter(30, time.Minute)
+		paymentRateLimit := api.NewIPRateLimiter(20, time.Minute)
+		r.With(vopRateLimit).Post("/payees/verify", h.VerifyPayee)
+		r.With(paymentRateLimit).Post("/payments", h.CreatePayment)
+		r.Get("/payments", h.ListPayments)
+		r.Get("/payments/{id}", h.GetPayment)
+		r.With(paymentRateLimit).Post("/payments/{id}/confirm", h.ConfirmPayment)
+		r.Post("/payments/{id}/cancel", h.CancelPayment)
+		r.Post("/standing-orders", h.CreateStandingOrder)
+		r.Get("/standing-orders", h.ListStandingOrders)
+		r.Patch("/standing-orders/{id}", h.UpdateStandingOrder)
+		r.Delete("/standing-orders/{id}", h.DeleteStandingOrder)
+		r.Get("/beneficiaries", h.ListBeneficiaries)
+		r.Post("/beneficiaries", h.CreateBeneficiary)
+		r.Get("/events", h.Events)
 	})
+
+	// Free-demo profile: process due orders only while the web service is awake.
+	// Set ENABLE_IN_PROCESS_SCHEDULER=false when running the paid background
+	// worker profile to avoid unnecessary polling (SKIP LOCKED remains safe).
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("ENABLE_IN_PROCESS_SCHEDULER")), "false") {
+		go func() {
+			ctx := context.Background()
+			if processed, workerErr := paymentSvc.RunDuePayments(ctx, 25); workerErr != nil {
+				zlog.Error().Err(workerErr).Msg("Initial scheduled-payment scan failed")
+			} else if processed > 0 {
+				zlog.Info().Int("processed", processed).Msg("Initial scheduled payments processed")
+			}
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if processed, workerErr := paymentSvc.RunDuePayments(ctx, 25); workerErr != nil {
+					zlog.Error().Err(workerErr).Msg("Scheduled-payment scan failed")
+				} else if processed > 0 {
+					zlog.Info().Int("processed", processed).Msg("Scheduled payments processed")
+				}
+			}
+		}()
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
