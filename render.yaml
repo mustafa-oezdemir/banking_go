@@ -19,6 +19,22 @@ services:
           property: connectionString
     healthCheckPath: /health
 
+  # Next.js frontend
+  - type: web
+    name: pehlione-banking-frontend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: BACKEND_API_URL
+        value: https://banking-go.onrender.com
+    healthCheckPath: /
+
 # PostgreSQL Database
 databases:
   - name: ledger-db
