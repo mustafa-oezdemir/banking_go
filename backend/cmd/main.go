@@ -165,14 +165,26 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func loadEnvironment() error {
+	var lastErr error
+	for _, envPath := range []string{".env", "../.env"} {
+		if err := godotenv.Load(envPath); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
 func main() {
 	// Capture startup time so health endpoint can report uptime.
 	startTime := time.Now()
 
 	initLogger()
 
-	if err := godotenv.Load(); err != nil {
-		zlog.Warn().Err(err).Msg("No .env file found – using system env")
+	if err := loadEnvironment(); err != nil {
+		zlog.Info().Err(err).Msg("No .env file found – using system environment")
 	}
 
 	if err := api.InitTokenAuthFromEnv(); err != nil {

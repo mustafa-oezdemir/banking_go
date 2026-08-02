@@ -32,7 +32,7 @@ Dont forget to star and fork this project repo
 This README is intentionally concise and implementation-focused.
 
 For the full technical narrative and tutorial, read the FreeCodeCamp article: [How to Build a Bank Ledger in Golang with PostgreSQL using Double-Entry Accounting](https://www.freecodecamp.org/news/build-a-bank-ledger-in-go-with-postgresql-using-the-double-entry-accounting-principle/)
-![freecodecamp](internal/public/freecodecamp.png)
+![freecodecamp](backend/internal/public/freecodecamp.png)
 
 ## Core Ledger Model
 
@@ -48,7 +48,7 @@ Key constraints and behaviors implemented in code:
 - account row locking (`FOR UPDATE`) during balance-changing operations
 - serializable transactions with automatic retry on SQLSTATE `40001`
 - reconciliation query computes `SUM(credit) - SUM(debit)` as source of truth
-  ![Demo](internal/public/frontend.png)
+  ![Demo](backend/internal/public/frontend.png)
 
 ## Tech Stack
 
@@ -82,27 +82,25 @@ Protected (Bearer token required):
 - `GET /accounts/{id}/entries`
 - `GET /accounts/{id}/reconcile`
 - `GET /transactions/{id}`
-  ![Backend API Endpoint; Swagger Documentation](internal/public/swagger.png)
+  ![Backend API Endpoint; Swagger Documentation](backend/internal/public/swagger.png)
 
 ## Project Structure
 
 ```text
 .
-├── cmd/
-│   └── main.go
-├── internal/
-│   ├── api/
-│   ├── db/
-│   └── service/
-├── postgres/
-│   ├── migrations/
-│   ├── queries/
-│   └── sqlc/
-├── docs/
+├── backend/
+│   ├── cmd/
+│   ├── internal/
+│   ├── postgres/
+│   ├── docs/
+│   ├── Dockerfile
+│   └── go.mod
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   └── Dockerfile
 ├── docker-compose.yml
-├── docker-entrypoint
-├── Dockerfile
-├── Makefile
+├── start.ps1
 └── README.md
 ```
 
@@ -137,7 +135,7 @@ Docker Desktop açıkken repository kökünden çalıştırın:
 This builds and starts the complete local stack:
 
 - Frontend: http://localhost:3000 (`frontend/`)
-- Backend API: http://localhost:8080 (repository root)
+- Backend API: http://localhost:8080 (`backend/`)
 - PostgreSQL: `localhost:5433`
 
 Stop all services with:
@@ -153,6 +151,7 @@ git clone https://github.com/PaulBabatuyi/double-entry-bank-Go.git
 cd double-entry-bank-Go
 cp .env.example .env
 # Set JWT_SECRET to at least 32 characters: openssl rand -base64 32
+cd backend
 
 make postgres
 make migrate-up

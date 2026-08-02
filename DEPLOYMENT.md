@@ -11,7 +11,7 @@ Frontend is deployed separately:
 
 ## Architecture
 
-- Web service: Docker runtime using `Dockerfile`
+- Web service: Docker runtime using `backend/Dockerfile`
 - Database: Render PostgreSQL (`ledger-db`)
 - Migrations: run automatically on service startup via `docker-entrypoint`
 
@@ -81,4 +81,4 @@ After deploy succeeds:
 ### Database schema missing
 
 - Review logs for migration errors
-- Ensure migration files exist in `postgres/migrations`
+- Ensure migration files exist in `backend/postgres/migrations`

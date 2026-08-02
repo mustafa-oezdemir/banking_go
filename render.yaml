@@ -6,7 +6,7 @@ services:
     plan: free
     region: oregon
     branch: main
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./backend/Dockerfile
     envVars:
       - key: PORT
         value: 8080

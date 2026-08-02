@@ -2,6 +2,11 @@
 
 set -eu
 
+url_encode() {
+    # Percent-encode every byte so credentials remain valid inside a URL.
+    printf '%s' "$1" | od -An -tx1 | tr -d ' \n' | sed 's/../%&/g'
+}
+
 resolve_db_url() {
     db_url="${DB_URL:-}"
 
@@ -16,7 +21,10 @@ resolve_db_url() {
     fi
 
     if [ -z "$db_url" ] && [ -n "${DB_HOST:-}" ]; then
-        db_url="postgresql://${DB_USER:-root}:${DB_PASSWORD:-}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME:-simple_ledger}?sslmode=${DB_SSLMODE:-disable}"
+        encoded_user="$(url_encode "${DB_USER:-root}")"
+        encoded_password="$(url_encode "${DB_PASSWORD:-}")"
+        encoded_database="$(url_encode "${DB_NAME:-simple_ledger}")"
+        db_url="postgresql://${encoded_user}:${encoded_password}@${DB_HOST}:${DB_PORT:-5432}/${encoded_database}?sslmode=${DB_SSLMODE:-disable}"
     fi
 
     case "$db_url" in

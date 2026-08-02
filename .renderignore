@@ -15,3 +15,5 @@ run_tests.sh
 scripts/
 coverage.out
 .golangci.yml
+frontend/
+start.ps1

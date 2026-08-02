@@ -2,7 +2,7 @@ version: 2
 updates:
   # Go modules
   - package-ecosystem: "gomod"
-    directory: "/"
+    directory: "/backend"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -16,7 +16,7 @@ updates:
 
   # Docker
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/backend"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -26,6 +26,20 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(docker)"
+
+  # Frontend packages
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

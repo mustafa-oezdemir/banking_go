@@ -41,6 +41,7 @@ build/
 
 # Dependencies (will be downloaded in build)
 vendor/
+frontend/
 
 # Misc
 *.log

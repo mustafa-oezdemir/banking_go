@@ -2,12 +2,13 @@
 
 DB_URL_DOCKER=postgresql://root:secret@127.0.0.1:5433/simple_ledger?sslmode=disable
 DB_URL_LOCAL=postgresql://root:secret@127.0.0.1:5432/simple_ledger?sslmode=disable
+COMPOSE=docker compose -f ../docker-compose.yml --env-file ../.env
 
 postgres:
-	docker compose up -d
+	$(COMPOSE) up -d db
 
 createdb:
-	docker compose exec db createdb --username=root --owner=root simple_ledger || true
+	$(COMPOSE) exec db createdb --username=root --owner=root simple_ledger || true
 
 migrate-up:
 	migrate -path postgres/migrations/ -database "$(DB_URL_DOCKER)" -verbose up
@@ -46,7 +47,7 @@ coverage:
 # Run tests like CI does (with migrations)
 ci-test:
 	@echo "Setting up test database..."
-	@docker compose up -d
+	@$(COMPOSE) up -d db
 	@sleep 2
 	@echo "Running migrations..."
 	@migrate -path postgres/migrations/ -database "$(DB_URL_DOCKER)" up
@@ -56,22 +57,22 @@ ci-test:
 
 # Build Docker image locally
 docker-build:
-	docker build -t double-entry-bank-go:local .
+	docker build -f Dockerfile -t double-entry-bank-go:local ..
 
 # Start full stack with Docker Compose
 docker-up:
-	docker compose up -d
+	$(COMPOSE) up -d
 
 # Stop Docker Compose services
 docker-down:
-	docker compose down
+	$(COMPOSE) down
 
 # Clean up build artifacts and test files
 clean:
 	rm -f coverage.out coverage.txt
 	rm -f ledger ledger-*
 	rm -f *.test
-	docker compose down -v
+	$(COMPOSE) down -v
 
 # Display help
 help:

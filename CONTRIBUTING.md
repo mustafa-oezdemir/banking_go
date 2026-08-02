@@ -35,6 +35,8 @@ cp .env.example .env
 # Edit .env and set JWT_SECRET
 # Generate with: openssl rand -base64 32
 
+cd backend
+
 # Start PostgreSQL
 make postgres
 

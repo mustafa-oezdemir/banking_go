@@ -20,12 +20,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
           version: v1.55.2
           args: --timeout=5m
+          working-directory: backend
 
   build:
     name: Build
@@ -39,8 +41,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+          cache-dependency-path: backend/go.sum
 
       - name: Build binary
+        working-directory: backend
         run: |
           CGO_ENABLED=0 GOOS=linux go build -o ledger cmd/main.go
 
@@ -48,5 +52,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ledger-binary
-          path: ledger
+          path: backend/ledger
           retention-days: 7

@@ -4,48 +4,49 @@
   - changed-files:
     - any-glob-to-any-file: 
       - '**/*.md'
-      - 'docs/**/*'
+      - 'backend/docs/**/*'
 
 'dependencies':
   - changed-files:
     - any-glob-to-any-file:
-      - 'go.mod'
-      - 'go.sum'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
 
 'database':
   - changed-files:
     - any-glob-to-any-file:
-      - 'postgres/migrations/**/*'
-      - 'postgres/queries/**/*'
-      - 'postgres/sqlc/**/*'
+      - 'backend/postgres/migrations/**/*'
+      - 'backend/postgres/queries/**/*'
+      - 'backend/postgres/sqlc/**/*'
 
 'api':
   - changed-files:
     - any-glob-to-any-file:
-      - 'internal/api/**/*'
+      - 'backend/internal/api/**/*'
 
 'service':
   - changed-files:
     - any-glob-to-any-file:
-      - 'internal/service/**/*'
+      - 'backend/internal/service/**/*'
 
 'tests':
   - changed-files:
     - any-glob-to-any-file:
       - '**/*_test.go'
-      - 'run_tests.*'
+      - 'backend/run_tests.*'
 
 'ci/cd':
   - changed-files:
     - any-glob-to-any-file:
       - '.github/**/*'
-      - '.golangci.yml'
-      - 'Makefile'
+      - 'backend/.golangci.yml'
+      - 'backend/Makefile'
 
 'docker':
   - changed-files:
     - any-glob-to-any-file:
-      - 'Dockerfile'
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
       - 'docker-compose.yml'
       - '.dockerignore'
 

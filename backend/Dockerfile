@@ -2,10 +2,10 @@
 FROM golang:1.26-alpine AS builder
 WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY backend/. .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ledger ./cmd/main.go
 RUN GOBIN=/out go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3
 
@@ -18,7 +18,7 @@ COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /src/docs ./docs
 COPY --from=builder /src/postgres/migrations ./postgres/migrations
-COPY docker-entrypoint /usr/local/bin/entrypoint
+COPY backend/docker-entrypoint /usr/local/bin/entrypoint
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
 	TZ=UTC
