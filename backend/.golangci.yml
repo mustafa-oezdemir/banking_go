@@ -43,7 +43,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/PaulBabatuyi/Double-Entry-Bank-Go
+        - github.com/mustafa-oezdemir/banking_go
 
 issues:
   max-issues-per-linter: 50

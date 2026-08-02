@@ -214,23 +214,23 @@ export default function DashboardPage() {
             </a>
           </p>
 
-          {/* GitHub Link */}
-          <p>
+          {/* Project & Profile Links */}
+          <p className="flex flex-wrap items-center justify-center gap-2">
             <a
-              href="https://github.com/paulbabatuyi/double-entry-bank"
+              href="https://github.com/mustafa-oezdemir/banking_go"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center space-x-2 text-gray-300 hover:text-white transition group"
             >
-              <i className="fab fa-github text-lg group-hover:scale-110 transition"></i>
-              <span>Frontend on GitHub</span>
+              <i
+                className="fab fa-github text-lg group-hover:scale-110 transition"
+                aria-hidden="true"
+              ></i>
+              <span>GitHub Repository</span>
             </a>
-          </p>
-
-          {/* Portfolio & Backend Links */}
-          <p className="space-x-2">
+            <span className="text-gray-600">•</span>
             <a
-              href="https://paulbabatuyi.app"
+              href="https://pehlione.com/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-300 hover:text-blue-200 underline inline-block"
@@ -239,18 +239,18 @@ export default function DashboardPage() {
             </a>
             <span className="text-gray-600">•</span>
             <a
-              href="https://github.com/PaulBabatuyi/double-entry-bank-Go"
+              href="https://www.linkedin.com/in/mustafa-oezdemir/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-300 hover:text-blue-200 underline inline-block"
             >
-              Backend API
+              LinkedIn
             </a>
           </p>
 
           {/* Copyright */}
           <p className="text-gray-500 text-xs">
-            © {new Date().getFullYear()} Paul Babatuyi. All rights reserved.
+            © {new Date().getFullYear()} Mustafa Özdemir. All rights reserved.
           </p>
         </div>
       </footer>
