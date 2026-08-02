@@ -72,6 +72,15 @@ func GenerateGermanDemoIBAN() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate demo account number: %w", err)
 	}
+	return GermanDemoIBANForAccount(accountNumber.Uint64())
+}
+
+// GermanDemoIBANForAccount deterministically creates a valid demo IBAN for
+// seed data. Runtime account creation should normally use the random generator.
+func GermanDemoIBANForAccount(accountNumber uint64) (string, error) {
+	if accountNumber >= 10_000_000_000 {
+		return "", errors.New("demo account number must contain at most 10 digits")
+	}
 	bban := DemoBankCode + fmt.Sprintf("%010d", accountNumber)
 	checkInput := bban + "131400" // D=13, E=14, temporary checksum 00.
 	value := new(big.Int)

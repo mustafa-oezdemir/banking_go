@@ -1,0 +1,164 @@
+package service
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
+)
+
+const demoPassword = "Demo-Banking-2026!"
+
+type demoUser struct {
+	user    sqlc.User
+	current sqlc.Account
+	savings sqlc.Account
+}
+
+// SeedDemoData creates a deterministic, fictional data set. Every write uses a
+// unique constraint, a stable idempotency key, or an explicit existence check.
+func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, payments *PaymentService) error {
+	anna, err := ensureDemoUser(ctx, store, "anna.beispiel@demo.invalid", "Anna Beispiel", 1000)
+	if err != nil {
+		return err
+	}
+	maxUser, err := ensureDemoUser(ctx, store, "max.mustermann@demo.invalid", "Max Mustermann", 2000)
+	if err != nil {
+		return err
+	}
+	if err = ensureBalance(ctx, ledger, anna.current, "4850.00"); err != nil {
+		return err
+	}
+	if err = ensureBalance(ctx, ledger, maxUser.current, "2200.00"); err != nil {
+		return err
+	}
+
+	rentIBAN, _ := sepa.GermanDemoIBANForAccount(9000000001)
+	marketIBAN, _ := sepa.GermanDemoIBANForAccount(9000000002)
+	transitIBAN, _ := sepa.GermanDemoIBANForAccount(9000000003)
+	streamIBAN, _ := sepa.GermanDemoIBANForAccount(9000000004)
+	for _, beneficiary := range []sqlc.CreateBeneficiaryParams{
+		{OwnerID: anna.user.ID, Name: "Beispiel Hausverwaltung GmbH", Iban: rentIBAN, Category: nullString("Wohnen")},
+		{OwnerID: anna.user.ID, Name: "Demo Markt Berlin", Iban: marketIBAN, Category: nullString("Lebensmittel")},
+		{OwnerID: anna.user.ID, Name: "Demo Verkehrsbetriebe", Iban: transitIBAN, Category: nullString("Mobilität")},
+		{OwnerID: anna.user.ID, Name: "Demo Streaming GmbH", Iban: streamIBAN, Category: nullString("Abonnements")},
+	} {
+		if _, err = store.CreateBeneficiary(ctx, beneficiary); err != nil {
+			return fmt.Errorf("seed beneficiary: %w", err)
+		}
+	}
+
+	paymentsToCreate := []CreatePaymentInput{
+		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Beispiel Hausverwaltung GmbH", BeneficiaryIBAN: rentIBAN, Amount: "980.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Miete August", IdempotencyKey: "demo-seed-rent-v1"},
+		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Markt Berlin", BeneficiaryIBAN: marketIBAN, Amount: "86.40", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Supermarkt", IdempotencyKey: "demo-seed-market-v1"},
+		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Max Mustermann", BeneficiaryIBAN: maxUser.current.Iban, Amount: "24.50", TransferType: PaymentInstant, ScheduleType: ScheduleImmediate, Purpose: "Abendessen", IdempotencyKey: "demo-seed-instant-v1"},
+		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Verkehrsbetriebe", BeneficiaryIBAN: transitIBAN, Amount: "49.00", TransferType: PaymentStandard, ScheduleType: ScheduleScheduled, Purpose: "Deutschlandticket", RequestedExecution: time.Now().UTC().Add(72 * time.Hour), IdempotencyKey: "demo-seed-scheduled-v1"},
+	}
+	for _, input := range paymentsToCreate {
+		created, createErr := payments.CreatePayment(ctx, input)
+		if createErr != nil {
+			return fmt.Errorf("seed payment: %w", createErr)
+		}
+		if created.Order.Status == PaymentAwaitingConfirmation {
+			if _, confirmErr := payments.ConfirmPayment(ctx, anna.user.ID, created.Order.ID, created.Order.VopResult != VoPMatch); confirmErr != nil {
+				return fmt.Errorf("confirm seed payment: %w", confirmErr)
+			}
+		}
+	}
+
+	standing, err := store.ListStandingOrdersByOwner(ctx, anna.user.ID)
+	if err != nil {
+		return err
+	}
+	for _, order := range standing {
+		if order.Purpose.Valid && order.Purpose.String == "Demo Streaming Abo" {
+			return nil
+		}
+	}
+	_, err = payments.CreateStandingOrder(ctx, CreateStandingOrderInput{
+		OwnerID: anna.user.ID, SourceAccountID: anna.current.ID,
+		BeneficiaryName: "Demo Streaming GmbH", BeneficiaryIBAN: streamIBAN,
+		Amount: "12.99", Purpose: "Demo Streaming Abo", TransferType: PaymentStandard,
+		Frequency: "MONTHLY", StartDate: time.Now().UTC().Add(24 * time.Hour),
+	})
+	return err
+}
+
+func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string, accountBase uint64) (demoUser, error) {
+	user, err := store.GetUserByEmail(ctx, email)
+	if err == sql.ErrNoRows {
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(demoPassword), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return demoUser{}, hashErr
+		}
+		created, createErr := store.CreateUser(ctx, sqlc.CreateUserParams{Email: email, HashedPassword: string(hash), FullName: fullName})
+		if createErr != nil {
+			return demoUser{}, createErr
+		}
+		user, err = store.GetUserByID(ctx, created.ID)
+	}
+	if err != nil {
+		return demoUser{}, err
+	}
+	accounts, err := store.ListAccountsByOwner(ctx, uuid.NullUUID{UUID: user.ID, Valid: true})
+	if err != nil {
+		return demoUser{}, err
+	}
+	result := demoUser{user: user}
+	for _, account := range accounts {
+		switch account.AccountType {
+		case "GIROKONTO":
+			result.current = account
+		case "SPARKONTO":
+			result.savings = account
+		}
+	}
+	if result.current.ID == uuid.Nil {
+		result.current, err = createSeedAccount(ctx, store, user.ID, fullName+" Girokonto", "GIROKONTO", accountBase)
+		if err != nil {
+			return demoUser{}, err
+		}
+	}
+	if result.savings.ID == uuid.Nil {
+		result.savings, err = createSeedAccount(ctx, store, user.ID, fullName+" Sparkonto", "SPARKONTO", accountBase+1)
+	}
+	return result, err
+}
+
+func createSeedAccount(ctx context.Context, store *db.Store, ownerID uuid.UUID, name, accountType string, number uint64) (sqlc.Account, error) {
+	iban, err := sepa.GermanDemoIBANForAccount(number)
+	if err != nil {
+		return sqlc.Account{}, err
+	}
+	return store.CreateAccount(ctx, sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: ownerID, Valid: true}, Name: name, Currency: "EUR",
+		IsSystem: false, Iban: iban, AccountType: accountType, Status: "ACTIVE",
+	})
+}
+
+func ensureBalance(ctx context.Context, ledger *LedgerService, account sqlc.Account, desired string) error {
+	entries, err := ledger.store.ListEntriesByAccount(ctx, sqlc.ListEntriesByAccountParams{AccountID: account.ID, Limit: 1, Offset: 0})
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return nil
+	}
+	current, err := decimal.NewFromString(account.Balance)
+	if err != nil {
+		return err
+	}
+	target := decimal.RequireFromString(desired)
+	if current.GreaterThanOrEqual(target) {
+		return nil
+	}
+	return ledger.Deposit(ctx, account.ID, target.Sub(current).StringFixed(2))
+}

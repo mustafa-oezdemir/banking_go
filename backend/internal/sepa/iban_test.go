@@ -51,3 +51,12 @@ func TestValidateIBAN(t *testing.T) {
 func TestMaskIBAN(t *testing.T) {
 	assert.Equal(t, "DE89**************3000", MaskIBAN("DE89370400440532013000"))
 }
+
+func TestGermanDemoIBANForAccount(t *testing.T) {
+	iban, err := GermanDemoIBANForAccount(42)
+	require.NoError(t, err)
+	assert.Equal(t, "0000000042", iban[12:])
+	require.NoError(t, ValidateIBAN(iban))
+	_, err = GermanDemoIBANForAccount(10_000_000_000)
+	assert.Error(t, err)
+}

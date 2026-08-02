@@ -235,6 +235,15 @@ func main() {
 	ledgerSvc := service.NewLedgerService(store)
 	eventHub := service.NewEventHub()
 	paymentSvc := service.NewPaymentService(store, eventHub)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DEMO_SEED")), "true") {
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if seedErr := service.SeedDemoData(seedCtx, store, ledgerSvc, paymentSvc); seedErr != nil {
+			seedCancel()
+			zlog.Fatal().Err(seedErr).Msg("Demo seed failed")
+		}
+		seedCancel()
+		zlog.Info().Msg("Fictional demo seed is ready")
+	}
 
 	// Wire HTTP handlers with service and persistence dependencies.
 	h := api.NewHandlerWithPayments(ledgerSvc, paymentSvc, store)

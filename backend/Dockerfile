@@ -7,6 +7,7 @@ RUN go mod download
 
 COPY backend/. .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ledger ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/payment-worker ./cmd/worker
 RUN GOBIN=/out go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.3
 
 # Minimal runtime image
@@ -14,6 +15,7 @@ FROM alpine:3.21
 WORKDIR /app
 
 COPY --from=builder /out/ledger /usr/local/bin/ledger
+COPY --from=builder /out/payment-worker /usr/local/bin/payment-worker
 COPY --from=builder /out/migrate /usr/local/bin/migrate
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /src/docs ./docs
