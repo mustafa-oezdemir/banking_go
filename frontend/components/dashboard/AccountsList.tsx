@@ -14,6 +14,8 @@ import type { Account } from "@/lib/types";
 interface AccountsListProps {
   onReconcile: (accountId: string, accountName: string) => Promise<void>;
   onOpenCreateModal: () => void;
+  onEditAccount: (account: Account) => void;
+  onDeleteAccount: (account: Account) => void;
 }
 
 const MOBILE_DISPLAY_LIMIT = 3;
@@ -21,6 +23,8 @@ const MOBILE_DISPLAY_LIMIT = 3;
 export function AccountsList({
   onReconcile,
   onOpenCreateModal,
+  onEditAccount,
+  onDeleteAccount,
 }: AccountsListProps) {
   const accounts = useAuthStore((state) => state.accounts);
   const [showAllAccounts, setShowAllAccounts] = useState(false);
@@ -70,12 +74,33 @@ export function AccountsList({
                   <p className="text-xs text-gray-400 break-all">
                     ID: {truncate(account.id)}
                   </p>
-                  <button
-                    onClick={() => onReconcile(account.id, account.name)}
-                    className="text-xs text-blue-300 hover:text-blue-200 transition font-medium mt-0.5"
-                  >
-                    Reconcile
-                  </button>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs font-medium">
+                    <button
+                      type="button"
+                      onClick={() => onReconcile(account.id, account.name)}
+                      className="text-blue-300 hover:text-blue-200 transition"
+                    >
+                      Reconcile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onEditAccount(account)}
+                      className="text-amber-300 hover:text-amber-200 transition"
+                      aria-label={`Edit ${account.name}`}
+                    >
+                      <i className="fas fa-pen mr-1" aria-hidden="true"></i>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteAccount(account)}
+                      className="text-red-300 hover:text-red-200 transition"
+                      aria-label={`Delete ${account.name}`}
+                    >
+                      <i className="fas fa-trash mr-1" aria-hidden="true"></i>
+                      Delete
+                    </button>
+                  </div>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-xs md:text-sm font-bold text-green-400">

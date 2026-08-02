@@ -1,6 +1,6 @@
 module github.com/mustafa-oezdemir/banking_go
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/go-chi/chi/v5 v5.2.5
@@ -8,6 +8,7 @@ require (
 	github.com/go-chi/jwtauth/v5 v5.4.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lestrrat-go/jwx/v3 v3.0.2
 	github.com/lib/pq v1.11.2
 	github.com/rs/zerolog v1.34.0
 	github.com/shopspring/decimal v1.4.0
@@ -36,7 +37,6 @@ require (
 	github.com/lestrrat-go/blackmagic v1.0.3 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
 	github.com/lestrrat-go/httprc/v3 v3.0.0-beta2 // indirect
-	github.com/lestrrat-go/jwx/v3 v3.0.2 // indirect
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect

@@ -8,6 +8,7 @@
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useToastStore } from "@/lib/store/toastStore";
+import { logoutSession } from "@/lib/api";
 
 export function Header() {
   const router = useRouter();
@@ -15,10 +16,14 @@ export function Header() {
   const logout = useAuthStore((state) => state.logout);
   const showToast = useToastStore((state) => state.showToast);
 
-  const handleLogout = () => {
-    logout();
-    showToast("Logged out", "Come back soon!", "info");
-    router.push("/auth");
+  const handleLogout = async () => {
+    try {
+      await logoutSession();
+    } finally {
+      logout();
+      showToast("Logged out", "Come back soon!", "info");
+      router.push("/auth");
+    }
   };
 
   return (
@@ -31,10 +36,10 @@ export function Header() {
             <i className="fas fa-university text-2xl md:text-3xl text-purple-400 flex-shrink-0"></i>
             <div className="min-w-0">
               <h1 className="text-lg md:text-xl font-bold truncate">
-                Double-Entry Ledger
+                Pehlione Banking
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">
-                Fintech Backend in Go
+                Secure Double-Entry Ledger
               </p>
             </div>
           </div>

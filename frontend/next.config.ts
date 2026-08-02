@@ -1,7 +1,45 @@
 import type { NextConfig } from "next";
 
+const contentSecurityPolicyDirectives = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+  "font-src 'self' data: https://cdnjs.cloudflare.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self' blob:",
+];
+if (process.env.NODE_ENV === "production") {
+  contentSecurityPolicyDirectives.push("upgrade-insecure-requests");
+}
+const contentSecurityPolicy = contentSecurityPolicyDirectives.join("; ");
+
 const nextConfig: NextConfig = {
   output: "standalone",
+  poweredByHeader: false,
+  headers: async () => [
+    {
+      source: "/(.*)",
+      headers: [
+        { key: "Content-Security-Policy", value: contentSecurityPolicy },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "X-Frame-Options", value: "DENY" },
+        {
+          key: "Permissions-Policy",
+          value: "camera=(), microphone=(), geolocation=(), payment=()",
+        },
+        {
+          key: "Strict-Transport-Security",
+          value: "max-age=31536000; includeSubDomains",
+        },
+      ],
+    },
+  ],
   rewrites: async () => {
     const apiBaseUrl =
       process.env.BACKEND_API_URL ||
@@ -17,6 +55,14 @@ const nextConfig: NextConfig = {
         {
           source: "/login",
           destination: `${apiBaseUrl}/login`,
+        },
+        {
+          source: "/logout",
+          destination: `${apiBaseUrl}/logout`,
+        },
+        {
+          source: "/session",
+          destination: `${apiBaseUrl}/session`,
         },
         // Proxy accounts endpoints (both /accounts and /accounts/*)
         {

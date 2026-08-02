@@ -12,15 +12,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore((state) => state.hydrate);
 
   useEffect(() => {
-    // Hydrate auth store from localStorage on mount (client-side only)
-    hydrate();
-
     // Listen for auth logout events (e.g., from 401 responses)
     const handleLogout = () => {
       useAuthStore.getState().logout();
     };
 
     window.addEventListener("auth:logout", handleLogout);
+    // Validate the HttpOnly cookie session before hydrating client state.
+    void hydrate();
     return () => window.removeEventListener("auth:logout", handleLogout);
   }, [hydrate]);
 

@@ -8,6 +8,34 @@ SELECT * FROM accounts
 WHERE id = $1
 LIMIT 1;
 
+-- name: UpdateAccount :one
+UPDATE accounts
+SET name = sqlc.arg(name)
+WHERE accounts.id = sqlc.arg(account_id)
+  AND accounts.owner_id = sqlc.arg(owner_id)
+  AND accounts.is_system = FALSE
+RETURNING accounts.*;
+
+-- name: AccountHasEntries :one
+SELECT EXISTS (
+    SELECT 1
+    FROM entries
+    WHERE account_id = sqlc.arg(account_id)
+);
+
+-- name: DeleteAccount :one
+DELETE FROM accounts
+WHERE accounts.id = sqlc.arg(account_id)
+  AND accounts.owner_id = sqlc.arg(owner_id)
+  AND accounts.is_system = FALSE
+  AND accounts.balance = 0
+  AND NOT EXISTS (
+      SELECT 1
+      FROM entries
+      WHERE entries.account_id = accounts.id
+  )
+RETURNING accounts.*;
+
 -- name: GetAccountForUpdate :one
 SELECT * FROM accounts
 WHERE id = $1

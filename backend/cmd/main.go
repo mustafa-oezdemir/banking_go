@@ -50,7 +50,12 @@ func parseAllowedOrigins() []string {
 	origins := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if strings.TrimSpace(origins) == "" {
 		return []string{
-			"https://golangbank.app",
+			"https://pehlione-banking.com",
+			"https://www.pehlione-banking.com",
+			"https://pehlione-banking-frontend.onrender.com",
+			"https://banking-go.onrender.com",
+			"http://localhost:8080",
+			"http://127.0.0.1:8080",
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
 			"http://localhost:5173",
@@ -70,7 +75,12 @@ func parseAllowedOrigins() []string {
 
 	if len(allowed) == 0 {
 		return []string{
-			"https://golangbank.app",
+			"https://pehlione-banking.com",
+			"https://www.pehlione-banking.com",
+			"https://pehlione-banking-frontend.onrender.com",
+			"https://banking-go.onrender.com",
+			"http://localhost:8080",
+			"http://127.0.0.1:8080",
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
 			"http://localhost:5173",
@@ -231,12 +241,18 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(api.SecurityHeaders)
+	r.Use(api.NewIPRateLimiter(300, time.Minute))
+	r.Use(api.LimitRequestBody(1 << 20))
+	r.Use(api.RequireJSON)
+	allowedOrigins := parseAllowedOrigins()
+	r.Use(api.CSRFProtection(allowedOrigins))
 
 	// CORS middleware for separate frontend deployments and local development.
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   parseAllowedOrigins(),
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Protection"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -252,8 +268,10 @@ func main() {
 	})
 
 	// Public routes
-	r.Post("/register", h.Register)
-	r.Post("/login", h.Login)
+	authRateLimit := api.NewIPRateLimiter(10, time.Minute)
+	r.With(authRateLimit).Post("/register", h.Register)
+	r.With(authRateLimit).Post("/login", h.Login)
+	r.Post("/logout", h.Logout)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		// Health returns service liveness plus lightweight runtime metadata.
 		zlog.Info().Msg("Health check requested")
@@ -278,9 +296,12 @@ func main() {
 		r.Use(jwtauth.Verifier(api.TokenAuth))
 		r.Use(jwtauth.Authenticator(api.TokenAuth))
 
+		r.Get("/session", h.Session)
 		r.Post("/accounts", h.CreateAccount)
 		r.Get("/accounts", h.ListAccounts)
 		r.Get("/accounts/{id}", h.GetAccount)
+		r.Put("/accounts/{id}", h.UpdateAccount)
+		r.Delete("/accounts/{id}", h.DeleteAccount)
 		r.Post("/accounts/{id}/deposit", h.Deposit)
 		r.Post("/accounts/{id}/withdraw", h.Withdraw)
 		r.Post("/transfers", h.Transfer)

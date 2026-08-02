@@ -21,17 +21,19 @@ export function getAPIBaseURL(): string {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     const isVercelHost = host.endsWith(".vercel.app");
-    const isCustomFrontendDomain = host === "golangbank.app";
+    const isCustomFrontendDomain =
+      host === "pehlione-banking.com" ||
+      host === "www.pehlione-banking.com";
 
     if (isVercelHost || isCustomFrontendDomain) {
-      return "https://double-entry-bank-go.onrender.com";
+      return "https://banking-go.onrender.com";
     }
 
     return window.location.origin;
   }
 
   // Server-side fallback
-  return "https://double-entry-bank-go.onrender.com";
+  return "https://banking-go.onrender.com";
 }
 
 export const API_BASE_URL = getAPIBaseURL();
@@ -40,7 +42,10 @@ export const API_BASE_URL = getAPIBaseURL();
 export const API_ENDPOINTS = {
   REGISTER: "/register",
   LOGIN: "/login",
+  LOGOUT: "/logout",
+  SESSION: "/session",
   ACCOUNTS: "/accounts",
+  ACCOUNT: (accountId: string) => `/accounts/${accountId}`,
   DEPOSIT: (accountId: string) => `/accounts/${accountId}/deposit`,
   WITHDRAW: (accountId: string) => `/accounts/${accountId}/withdraw`,
   TRANSFERS: "/transfers",
@@ -62,6 +67,5 @@ export const CURRENCY = {
 
 // Local storage keys
 export const STORAGE_KEYS = {
-  TOKEN: "token",
   EMAIL: "email",
 } as const;

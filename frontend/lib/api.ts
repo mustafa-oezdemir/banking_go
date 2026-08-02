@@ -10,8 +10,8 @@ import type {
   Entry,
   MessageResponse,
   ReconcileResponse,
-  TokenResponse,
   RegisterResponse,
+  SessionResponse,
 } from "@/lib/types";
 
 /**
@@ -27,13 +27,9 @@ export async function request<T>(
     ...((options.headers || {}) as Record<string, string>),
   };
 
-  // Add authorization header if token exists
-  const token =
-    typeof window !== "undefined"
-      ? localStorage.getItem(STORAGE_KEYS.TOKEN)
-      : null;
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  const method = (options.method || "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    headers["X-CSRF-Protection"] = "1";
   }
 
   let response: Response;
@@ -41,6 +37,7 @@ export async function request<T>(
     // Use relative path - Next.js will rewrite to backend via rewrites config
     response = await fetch(endpoint, {
       cache: "no-store",
+      credentials: "same-origin",
       ...options,
       headers,
     });
@@ -50,11 +47,11 @@ export async function request<T>(
     throw new Error(`Request to ${endpoint} failed: ${reason}`);
   }
 
-  // Handle 401: if the user already has a session token, it has expired
-  if (response.status === 401 && token) {
-    // Clear token and redirect to login
+  // Handle an expired or invalid HttpOnly cookie session.
+  const isCredentialEndpoint =
+    endpoint === API_ENDPOINTS.LOGIN || endpoint === API_ENDPOINTS.REGISTER;
+  if (response.status === 401 && !isCredentialEndpoint) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem(STORAGE_KEYS.TOKEN);
       localStorage.removeItem(STORAGE_KEYS.EMAIL);
       // Emit a custom event that hooks can listen to
       window.dispatchEvent(new Event("auth:logout"));
@@ -97,8 +94,8 @@ export async function register(
 export async function login(
   email: string,
   password: string,
-): Promise<ApiResponse<TokenResponse>> {
-  return request<TokenResponse>(API_ENDPOINTS.LOGIN, {
+): Promise<ApiResponse<MessageResponse>> {
+  return request<MessageResponse>(API_ENDPOINTS.LOGIN, {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
@@ -112,6 +109,29 @@ export async function getAccounts(): Promise<ApiResponse<Account[]>> {
 }
 
 /**
+ * Get the current HttpOnly-cookie session
+ */
+export async function getSession(): Promise<ApiResponse<SessionResponse>> {
+  return request<SessionResponse>(API_ENDPOINTS.SESSION);
+}
+
+/**
+ * End the current browser session
+ */
+export async function logoutSession(): Promise<ApiResponse<MessageResponse>> {
+  return request<MessageResponse>(API_ENDPOINTS.LOGOUT, { method: "POST" });
+}
+
+/**
+ * Get a single user account
+ */
+export async function getAccount(
+  accountId: string,
+): Promise<ApiResponse<Account>> {
+  return request<Account>(API_ENDPOINTS.ACCOUNT(accountId));
+}
+
+/**
  * Create a new account
  */
 export async function createAccount(
@@ -120,6 +140,30 @@ export async function createAccount(
   return request<Account>(API_ENDPOINTS.ACCOUNTS, {
     method: "POST",
     body: JSON.stringify({ name, currency: "USD" }),
+  });
+}
+
+/**
+ * Rename an existing account
+ */
+export async function updateAccount(
+  accountId: string,
+  name: string,
+): Promise<ApiResponse<Account>> {
+  return request<Account>(API_ENDPOINTS.ACCOUNT(accountId), {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/**
+ * Delete an unused account
+ */
+export async function deleteAccount(
+  accountId: string,
+): Promise<ApiResponse<MessageResponse>> {
+  return request<MessageResponse>(API_ENDPOINTS.ACCOUNT(accountId), {
+    method: "DELETE",
   });
 }
 

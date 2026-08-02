@@ -1,55 +1,59 @@
 version: 2
 updates:
-  # Go modules
   - package-ecosystem: "gomod"
     directory: "/backend"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-      - "go"
+    labels: ["dependencies", "go"]
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    groups:
+      go-dependencies:
+        patterns: ["*"]
 
-  # Docker
-  - package-ecosystem: "docker"
-    directory: "/backend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "docker"
-    commit-message:
-      prefix: "chore(docker)"
-
-  # Frontend packages
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-      - "frontend"
+    labels: ["dependencies", "frontend"]
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    groups:
+      frontend-dependencies:
+        patterns: ["*"]
 
-  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "github-actions"
+    labels: ["dependencies", "github-actions"]
     commit-message:
       prefix: "chore(actions)"
+
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "chore(docker)"
+
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "chore(docker)"

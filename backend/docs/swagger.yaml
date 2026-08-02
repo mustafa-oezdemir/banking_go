@@ -57,14 +57,7 @@ definitions:
     properties:
       email:
         type: string
-      token:
-        type: string
       user_id:
-        type: string
-    type: object
-  api.TokenResponse:
-    properties:
-      token:
         type: string
     type: object
 host: localhost:8080
@@ -138,6 +131,51 @@ paths:
       tags:
       - accounts
   /accounts/{id}:
+    delete:
+      description: Deletes a user-owned account only when its balance is zero and
+        it has no ledger entries
+      parameters:
+      - description: Account ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - Bearer: []
+      summary: Delete an unused account
+      tags:
+      - accounts
     get:
       description: Returns details of a specific account
       parameters:
@@ -172,6 +210,57 @@ paths:
       security:
       - Bearer: []
       summary: Get account details
+      tags:
+      - accounts
+    put:
+      consumes:
+      - application/json
+      description: Renames an account owned by the authenticated user
+      parameters:
+      - description: Account ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated account details
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            name:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.AccountResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - Bearer: []
+      summary: Update an account
       tags:
       - accounts
   /accounts/{id}/deposit:
@@ -394,7 +483,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.TokenResponse'
+            $ref: '#/definitions/api.MessageResponse'
         "400":
           description: Bad Request
           schema:

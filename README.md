@@ -217,6 +217,24 @@ make docker-up      # Start full stack with Docker Compose
 make docker-down    # Stop Docker Compose services
 ```
 
+## Security
+
+The application uses HttpOnly `SameSite=Strict` session cookies, CSRF and
+origin checks, per-IP rate limits, request-size and JSON content-type limits,
+security headers, parameterized SQLC queries, and owner checks on every account
+operation. Passwords must contain at least 15 characters and are stored with
+bcrypt.
+
+Run the authorized local security smoke suite after starting the stack:
+
+```powershell
+.\security-smoke.ps1
+```
+
+The test refuses non-loopback targets unless `-AllowRemote` is explicitly
+provided. See [`SECURITY.md`](SECURITY.md) for the security model, automated
+scans, and responsible disclosure instructions.
+
 ## Deployment
 
 The Render backend blueprint is defined in [`render.yaml`](render.yaml). Container definitions are maintained separately in [`backend/Dockerfile`](backend/Dockerfile) and [`frontend/Dockerfile`](frontend/Dockerfile).

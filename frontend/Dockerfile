@@ -1,11 +1,11 @@
-FROM node:22-alpine AS dependencies
+FROM node:24-alpine AS dependencies
 WORKDIR /app
 
 RUN corepack enable
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile
 
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1

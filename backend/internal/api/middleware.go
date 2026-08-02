@@ -2,16 +2,26 @@ package api
 
 import (
 	"errors"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/google/uuid"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 )
 
 var (
 	// TokenAuth holds the JWT authenticator used by the API package.
 	TokenAuth *jwtauth.JWTAuth
+)
+
+const (
+	sessionCookieName = "jwt"
+	sessionDuration   = 2 * time.Hour
+	tokenIssuer       = "pehlione-banking"
+	tokenAudience     = "pehlione-banking-web"
 )
 
 // InitTokenAuthFromEnv initializes JWT auth using the JWT_SECRET environment variable.
@@ -32,7 +42,13 @@ func InitTokenAuth(secret string) error {
 		return errors.New("JWT_SECRET must be at least 32 characters")
 	}
 
-	TokenAuth = jwtauth.New("HS256", []byte(secret), nil)
+	TokenAuth = jwtauth.New(
+		"HS256",
+		[]byte(secret),
+		nil,
+		jwt.WithIssuer(tokenIssuer),
+		jwt.WithAudience(tokenAudience),
+	)
 	return nil
 }
 
@@ -45,8 +61,49 @@ func GenerateToken(userID uuid.UUID) (string, error) {
 	// Include user identity and expiry in signed JWT claims.
 	claims := map[string]interface{}{
 		"user_id": userID.String(),
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"iss":     tokenIssuer,
+		"aud":     tokenAudience,
+		"jti":     uuid.NewString(),
+		"iat":     time.Now().Unix(),
+		"nbf":     time.Now().Add(-time.Minute).Unix(),
+		"exp":     time.Now().Add(sessionDuration).Unix(),
 	}
 	_, tokenString, err := TokenAuth.Encode(claims)
 	return tokenString, err
+}
+
+// SetSessionCookie stores the JWT in an HttpOnly, same-site session cookie.
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	secure := r.TLS != nil ||
+		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") ||
+		strings.EqualFold(os.Getenv("RENDER"), "true")
+	// Secure is disabled only for explicit local HTTP development.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Production sets Secure via TLS/proxy/Render detection.
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(sessionDuration.Seconds()),
+		Expires:  time.Now().Add(sessionDuration),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// ClearSessionCookie expires the browser session cookie.
+func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	secure := r.TLS != nil ||
+		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") ||
+		strings.EqualFold(os.Getenv("RENDER"), "true")
+	// Match the original cookie attributes so browsers reliably expire it.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Production sets Secure via TLS/proxy/Render detection.
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+	})
 }

@@ -4,7 +4,7 @@ import { Providers } from "@/components/Providers";
 import { Toast } from "@/components/Toast";
 
 export const metadata: Metadata = {
-  title: "Double-Entry Bank Ledger | Professional Banking System",
+  title: "Pehlione Banking | Secure Double-Entry Ledger",
   description:
     "Production-grade double-entry bookkeeping system with real-time account management, transfers, deposits, and comprehensive transaction tracking. Secure, responsive, and mobile-friendly financial management.",
   icons: {
@@ -29,6 +29,8 @@ export default function RootLayout({
         <link
           rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+          integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0"
+          crossOrigin="anonymous"
         />
       </head>
       <body className="min-h-screen flex flex-col bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">

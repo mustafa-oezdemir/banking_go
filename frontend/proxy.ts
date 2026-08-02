@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function proxy(request: NextRequest) {
-  const token = request.cookies.get("token")?.value;
+  const token = request.cookies.get("jwt")?.value;
 
   // Protected route patterns
   const protectedRoutes = ["/dashboard", "/accounts"];
@@ -18,11 +18,6 @@ export function proxy(request: NextRequest) {
   // Redirect to auth if no token and trying to access protected route
   if (isProtectedRoute && !token) {
     return NextResponse.redirect(new URL("/auth", request.url));
-  }
-
-  // Redirect to dashboard if already authenticated and trying to access auth
-  if (request.nextUrl.pathname === "/auth" && token) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();

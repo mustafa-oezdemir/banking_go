@@ -16,29 +16,35 @@ import { AccountsList } from "@/components/dashboard/AccountsList";
 import { TransactionHistory } from "@/components/dashboard/TransactionHistory";
 import { FunctionForms } from "@/components/dashboard/FunctionForms";
 import { CreateAccountModal } from "@/components/dashboard/CreateAccountModal";
+import { EditAccountModal } from "@/components/dashboard/EditAccountModal";
+import { DeleteAccountModal } from "@/components/dashboard/DeleteAccountModal";
 import type { Entry, Account } from "@/lib/types";
 
 export default function DashboardPage() {
   const router = useRouter();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
+  const isHydrated = useAuthStore((state) => state.isHydrated);
   const setAccounts = useAuthStore((state) => state.setAccounts);
   const showToast = useToastStore((state) => state.showToast);
 
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [accountToEdit, setAccountToEdit] = useState<Account | null>(null);
+  const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
   // Check authentication
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (isHydrated && !isAuthenticated) {
       router.push("/auth");
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isHydrated, router]);
 
   // Load transactions with timeout to prevent hanging
   const loadTransactions = useCallback(async (accs: Account[]) => {
-    // Only clear if we have accounts to load from; preserve existing transactions during failed refreshes
+    // A successful empty account response means there is no transaction history to show.
     if (accs.length === 0) {
+      setEntries([]);
       return;
     }
 
@@ -155,7 +161,7 @@ export default function DashboardPage() {
     [showToast, loadAccounts],
   );
 
-  if (!isAuthenticated) {
+  if (!isHydrated || !isAuthenticated) {
     return null;
   }
 
@@ -171,6 +177,8 @@ export default function DashboardPage() {
         <AccountsList
           onReconcile={handleReconcile}
           onOpenCreateModal={() => setIsCreateModalOpen(true)}
+          onEditAccount={setAccountToEdit}
+          onDeleteAccount={setAccountToDelete}
         />
 
         {/* Function Forms Section - Deposit/Withdraw/Transfer */}
@@ -186,6 +194,18 @@ export default function DashboardPage() {
       <CreateAccountModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={handleRefreshAfterMutation}
+      />
+
+      <EditAccountModal
+        account={accountToEdit}
+        onClose={() => setAccountToEdit(null)}
+        onSuccess={handleRefreshAfterMutation}
+      />
+
+      <DeleteAccountModal
+        account={accountToDelete}
+        onClose={() => setAccountToDelete(null)}
         onSuccess={handleRefreshAfterMutation}
       />
 

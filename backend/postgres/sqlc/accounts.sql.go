@@ -11,6 +11,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const accountHasEntries = `-- name: AccountHasEntries :one
+SELECT EXISTS (
+    SELECT 1
+    FROM entries
+    WHERE account_id = $1
+)
+`
+
+func (q *Queries) AccountHasEntries(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, accountHasEntries, accountID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const createAccount = `-- name: CreateAccount :one
 INSERT INTO accounts (owner_id, name, currency, is_system)
 VALUES ($1, $2, $3, $4)
@@ -31,6 +46,40 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		arg.Currency,
 		arg.IsSystem,
 	)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.Balance,
+		&i.Currency,
+		&i.IsSystem,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteAccount = `-- name: DeleteAccount :one
+DELETE FROM accounts
+WHERE accounts.id = $1
+  AND accounts.owner_id = $2
+  AND accounts.is_system = FALSE
+  AND accounts.balance = 0
+  AND NOT EXISTS (
+      SELECT 1
+      FROM entries
+      WHERE entries.account_id = accounts.id
+  )
+RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at
+`
+
+type DeleteAccountParams struct {
+	AccountID uuid.UUID     `json:"account_id"`
+	OwnerID   uuid.NullUUID `json:"owner_id"`
+}
+
+func (q *Queries) DeleteAccount(ctx context.Context, arg DeleteAccountParams) (Account, error) {
+	row := q.db.QueryRowContext(ctx, deleteAccount, arg.AccountID, arg.OwnerID)
 	var i Account
 	err := row.Scan(
 		&i.ID,
@@ -182,6 +231,36 @@ func (q *Queries) ListAccountsByOwner(ctx context.Context, ownerID uuid.NullUUID
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAccount = `-- name: UpdateAccount :one
+UPDATE accounts
+SET name = $1
+WHERE accounts.id = $2
+  AND accounts.owner_id = $3
+  AND accounts.is_system = FALSE
+RETURNING accounts.id, accounts.owner_id, accounts.name, accounts.balance, accounts.currency, accounts.is_system, accounts.created_at
+`
+
+type UpdateAccountParams struct {
+	Name      string        `json:"name"`
+	AccountID uuid.UUID     `json:"account_id"`
+	OwnerID   uuid.NullUUID `json:"owner_id"`
+}
+
+func (q *Queries) UpdateAccount(ctx context.Context, arg UpdateAccountParams) (Account, error) {
+	row := q.db.QueryRowContext(ctx, updateAccount, arg.Name, arg.AccountID, arg.OwnerID)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.Balance,
+		&i.Currency,
+		&i.IsSystem,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateAccountBalance = `-- name: UpdateAccountBalance :exec

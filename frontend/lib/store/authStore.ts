@@ -9,6 +9,7 @@ import { create } from "zustand";
 import type { Account, User } from "@/lib/types";
 import { STORAGE_KEYS } from "@/lib/config";
 import { normalizeAccounts } from "@/lib/utils";
+import { getSession } from "@/lib/api";
 
 export interface AuthStore {
   // State
@@ -17,10 +18,9 @@ export interface AuthStore {
   isHydrated: boolean;
 
   // Actions
-  setToken: (token: string) => void;
-  setEmail: (email: string) => void;
+  setAuthenticated: (email: string) => void;
   setAccounts: (accounts: Account[]) => void;
-  hydrate: () => void;
+  hydrate: () => Promise<void>;
   logout: () => void;
   isAuthenticated: () => boolean;
 }
@@ -30,23 +30,11 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   accounts: [],
   isHydrated: false,
 
-  setToken: (token: string) => {
-    set((state) => ({
-      user: state.user ? { ...state.user, token } : { email: "", token },
-    }));
+  setAuthenticated: (email: string) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    set({ user: { email: normalizedEmail, authenticated: true } });
     if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-      // Also set in cookies for server-side middleware/proxy
-      document.cookie = `token=${token}; path=/; SameSite=Lax`;
-    }
-  },
-
-  setEmail: (email: string) => {
-    set((state) => ({
-      user: state.user ? { ...state.user, email } : { email, token: "" },
-    }));
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEYS.EMAIL, email);
+      localStorage.setItem(STORAGE_KEYS.EMAIL, normalizedEmail);
     }
   },
 
@@ -54,29 +42,32 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ accounts: normalizeAccounts(accounts) });
   },
 
-  hydrate: () => {
+  hydrate: async () => {
     if (typeof window === "undefined") return;
 
-    const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
     const email = localStorage.getItem(STORAGE_KEYS.EMAIL);
 
-    if (token && email) {
-      set({
-        user: { token, email },
-        isHydrated: true,
-      });
-    } else {
+    if (!email) {
       set({ isHydrated: true });
+      return;
     }
+
+    try {
+      const { response } = await getSession();
+      if (response.ok) {
+        set({ user: { email, authenticated: true }, isHydrated: true });
+        return;
+      }
+    } catch {
+      // Treat unavailable or invalid sessions as signed out.
+    }
+    localStorage.removeItem(STORAGE_KEYS.EMAIL);
+    set({ user: null, accounts: [], isHydrated: true });
   },
 
   logout: () => {
     if (typeof window !== "undefined") {
-      localStorage.removeItem(STORAGE_KEYS.TOKEN);
       localStorage.removeItem(STORAGE_KEYS.EMAIL);
-      // Clear cookie
-      document.cookie =
-        "token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;";
     }
     set({
       user: null,
@@ -86,6 +77,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   isAuthenticated: () => {
     const { user } = get();
-    return !!user?.token;
+    return user?.authenticated === true;
   },
 }));

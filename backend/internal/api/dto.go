@@ -31,12 +31,11 @@ type EntryResponse struct {
 type RegisterResponse struct {
 	UserID string `json:"user_id"`
 	Email  string `json:"email"`
-	Token  string `json:"token"`
 }
 
-// TokenResponse contains a signed JWT.
-type TokenResponse struct {
-	Token string `json:"token"`
+// SessionResponse describes the authenticated browser session.
+type SessionResponse struct {
+	UserID string `json:"user_id"`
 }
 
 // MessageResponse contains a simple status message.

@@ -11,9 +11,11 @@ import (
 )
 
 type Querier interface {
+	AccountHasEntries(ctx context.Context, accountID uuid.UUID) (bool, error)
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
 	CreateEntry(ctx context.Context, arg CreateEntryParams) (Entry, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	DeleteAccount(ctx context.Context, arg DeleteAccountParams) (Account, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	// lock prevents concurrent transactions from reading a stale balance.
 	GetAccountBalance(ctx context.Context, accountID uuid.UUID) (string, error)
@@ -25,6 +27,7 @@ type Querier interface {
 	ListAccountsByOwner(ctx context.Context, ownerID uuid.NullUUID) ([]Account, error)
 	ListEntriesByAccount(ctx context.Context, arg ListEntriesByAccountParams) ([]Entry, error)
 	ListEntriesByTransaction(ctx context.Context, transactionID uuid.UUID) ([]Entry, error)
+	UpdateAccount(ctx context.Context, arg UpdateAccountParams) (Account, error)
 	UpdateAccountBalance(ctx context.Context, arg UpdateAccountBalanceParams) error
 }
 

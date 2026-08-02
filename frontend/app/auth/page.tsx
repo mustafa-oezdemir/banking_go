@@ -5,7 +5,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useToastStore } from "@/lib/store/toastStore";
@@ -14,13 +14,20 @@ import { getAPIBaseURL } from "@/lib/config";
 
 export default function AuthPage() {
   const router = useRouter();
-  const setToken = useAuthStore((state) => state.setToken);
-  const setEmail = useAuthStore((state) => state.setEmail);
+  const setAuthenticated = useAuthStore((state) => state.setAuthenticated);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
+  const isHydrated = useAuthStore((state) => state.isHydrated);
   const showToast = useToastStore((state) => state.showToast);
 
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [authMessage, setAuthMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (isHydrated && isAuthenticated) {
+      router.replace("/dashboard");
+    }
+  }, [isAuthenticated, isHydrated, router]);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -34,9 +41,8 @@ export default function AuthPage() {
     try {
       const { response, data } = await login(email, password);
 
-      if (response.ok && data && data.token) {
-        setToken(data.token);
-        setEmail(email);
+      if (response.ok) {
+        setAuthenticated(email);
         showToast("Welcome back!", "Login successful", "success");
         router.push("/dashboard");
       } else if (response.status === 401) {
@@ -74,9 +80,8 @@ export default function AuthPage() {
     try {
       const { response, data } = await register(email, password);
 
-      if (response.ok && data && data.token) {
-        setToken(data.token);
-        setEmail(email);
+      if (response.ok) {
+        setAuthenticated(email);
         showToast(
           "Account created!",
           "Welcome to the banking system",
@@ -106,6 +111,10 @@ export default function AuthPage() {
     }
   };
 
+  if (!isHydrated || isAuthenticated) {
+    return null;
+  }
+
   return (
     <>
       {/* Header */}
@@ -114,10 +123,10 @@ export default function AuthPage() {
           <i className="fas fa-university text-2xl md:text-3xl text-purple-400 flex-shrink-0"></i>
           <div className="min-w-0">
             <h1 className="text-lg md:text-xl font-bold truncate">
-              Double-Entry Ledger
+              Pehlione Banking
             </h1>
             <p className="text-xs text-gray-400 hidden sm:block">
-              Fintech Backend in Go
+              Secure banking ledger
             </p>
           </div>
         </div>
@@ -129,7 +138,7 @@ export default function AuthPage() {
           <div className="text-center mb-6 md:mb-8">
             <i className="fas fa-university text-4xl md:text-5xl text-purple-400 mb-3 md:mb-4"></i>
             <h2 className="text-xl md:text-2xl font-bold mb-2">
-              Banking Ledger System
+              Pehlione Banking
             </h2>
             <p className="text-gray-300 text-xs md:text-sm">
               Production-grade double-entry bookkeeping
@@ -175,6 +184,7 @@ export default function AuthPage() {
                   type="email"
                   name="email"
                   required
+                  autoComplete="email"
                   disabled={isLoading}
                   className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
                   placeholder="user@example.com"
@@ -188,6 +198,8 @@ export default function AuthPage() {
                   type="password"
                   name="password"
                   required
+                  maxLength={72}
+                  autoComplete="current-password"
                   disabled={isLoading}
                   className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
                   placeholder="••••••••"
@@ -224,6 +236,7 @@ export default function AuthPage() {
                   type="email"
                   name="register-email"
                   required
+                  autoComplete="email"
                   disabled={isLoading}
                   className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
                   placeholder="user@example.com"
@@ -237,13 +250,16 @@ export default function AuthPage() {
                   type="password"
                   name="register-password"
                   required
-                  minLength={6}
+                  minLength={15}
+                  maxLength={72}
+                  autoComplete="new-password"
                   disabled={isLoading}
                   className="w-full px-3 md:px-4 py-2 md:py-3 rounded-lg bg-white/5 border border-white/10 focus:border-purple-500 focus:outline-none text-sm md:text-base text-white placeholder-gray-500 disabled:opacity-50 transition"
                   placeholder="••••••••"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Password must be at least 6 characters
+                  Use at least 15 characters. Passphrases and Unicode are
+                  supported.
                 </p>
               </div>
               <button
@@ -310,20 +326,20 @@ export default function AuthPage() {
           {/* GitHub Link */}
           <p>
             <a
-              href="https://github.com/paulbabatuyi/double-entry-bank"
+              href="https://github.com/mustafa-oezdemir/banking_go"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center space-x-2 text-gray-300 hover:text-white transition group"
             >
               <i className="fab fa-github text-lg group-hover:scale-110 transition"></i>
-              <span>Frontend on GitHub</span>
+              <span>GitHub Repository</span>
             </a>
           </p>
 
           {/* Portfolio & Backend Links */}
           <p className="space-x-2">
             <a
-              href="https://paulbabatuyi.app"
+              href="https://pehlione.com/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-300 hover:text-blue-200 underline inline-block"
@@ -332,18 +348,18 @@ export default function AuthPage() {
             </a>
             <span className="text-gray-600">•</span>
             <a
-              href="https://github.com/PaulBabatuyi/double-entry-bank-Go"
+              href="https://www.linkedin.com/in/mustafa-oezdemir/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-300 hover:text-blue-200 underline inline-block"
             >
-              Backend API
+              LinkedIn
             </a>
           </p>
 
           {/* Copyright */}
           <p className="text-gray-500 text-xs">
-            © {new Date().getFullYear()} Paul Babatuyi. All rights reserved.
+            © {new Date().getFullYear()} Mustafa Özdemir. All rights reserved.
           </p>
         </div>
       </footer>

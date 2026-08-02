@@ -4,7 +4,7 @@
 
 export interface User {
   email: string;
-  token: string;
+  authenticated: boolean;
 }
 
 export interface Account {
@@ -37,13 +37,12 @@ export interface Transaction {
 }
 
 // API Response types
-export interface TokenResponse {
-  token: string;
+export interface RegisterResponse {
+  email: string;
+  user_id: string;
 }
 
-export interface RegisterResponse {
-  token: string;
-  email: string;
+export interface SessionResponse {
   user_id: string;
 }
 
