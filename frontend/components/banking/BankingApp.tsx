@@ -11,16 +11,21 @@ import {
 	getBeneficiaries,
 	getPayments,
 	getStandingOrders,
+	getSession,
+	getAdminOverview,
+	updateAdminUserRole,
+	updateAdminAccountStatus,
+	adjustAdminAccountBalance,
 	logoutSession,
 	updateStandingOrder,
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import type { Account, Beneficiary, Entry, Payment, StandingOrder } from "@/lib/types";
+import type { Account, AdminOverview, Beneficiary, Entry, Payment, StandingOrder } from "@/lib/types";
 import { TransferWizard } from "./TransferWizard";
 
-type View = "overview" | "accounts" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile";
+type View = "overview" | "accounts" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
 
-const navigation: Array<{ id: View; label: string; icon: string }> = [
+const customerNavigation: Array<{ id: View; label: string; icon: string }> = [
 	{ id: "overview", label: "Übersicht", icon: "⌂" },
 	{ id: "accounts", label: "Konten", icon: "▣" },
 	{ id: "transactions", label: "Umsätze", icon: "↕" },
@@ -34,6 +39,8 @@ const navigation: Array<{ id: View; label: string; icon: string }> = [
 export function BankingApp() {
 	const router = useRouter();
 	const email = useAuthStore((state) => state.user?.email ?? "");
+	const role = useAuthStore((state) => state.user?.role ?? "CUSTOMER");
+	const setRole = useAuthStore((state) => state.setRole);
 	const storedAccounts = useAuthStore((state) => state.accounts);
 	const setAccounts = useAuthStore((state) => state.setAccounts);
 	const logout = useAuthStore((state) => state.logout);
@@ -46,9 +53,15 @@ export function BankingApp() {
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [live, setLive] = useState(false);
 	const [error, setError] = useState("");
+	const navigation = useMemo(
+		() => role === "ADMIN" ? [...customerNavigation, { id: "admin" as View, label: "Administration", icon: "â˜…" }] : customerNavigation,
+		[role],
+	);
 
 	const loadAll = useCallback(async () => {
 		try {
+			const sessionResult = await getSession();
+			if (sessionResult.response.ok) setRole(sessionResult.data.role);
 			const [accountResult, paymentResult, standingResult, beneficiaryResult] = await Promise.all([
 				getAccounts(), getPayments(), getStandingOrders(), getBeneficiaries(),
 			]);
@@ -67,7 +80,7 @@ export function BankingApp() {
 		} finally {
 			setLoading(false);
 		}
-	}, [setAccounts]);
+	}, [setAccounts, setRole]);
 
 	useEffect(() => {
 		const task = queueMicrotask(() => void loadAll());
@@ -149,6 +162,7 @@ export function BankingApp() {
 							{view === "standing" && <Standing orders={standingOrders} onCreate={() => setView("transfer")} onToggle={async (order) => { await updateStandingOrder(order.id, { amount: order.amount, purpose: order.purpose, status: order.status === "ACTIVE" ? "PAUSED" : "ACTIVE", end_date: order.end_date, max_occurrences: order.max_occurrences }); await loadAll(); }} onDelete={async (id) => { await deleteStandingOrder(id); await loadAll(); }} />}
 							{view === "beneficiaries" && <Beneficiaries items={beneficiaries} />}
 							{view === "profile" && <Profile email={email} />}
+							{view === "admin" && role === "ADMIN" && <AdminPanel />}
 						</>
 					)}
 				</main>
@@ -227,6 +241,58 @@ function Beneficiaries({ items }: { items: Beneficiary[] }) {
 
 function Profile({ email }: { email: string }) {
 	return <div className="grid gap-5 lg:grid-cols-2"><Card className="p-5"><h2 className="font-bold">Profil</h2><dl className="mt-5 space-y-4 text-sm"><div><dt className="text-slate-500">E-Mail</dt><dd className="mt-1 font-semibold">{email}</dd></div><div><dt className="text-slate-500">Umgebung</dt><dd className="mt-1 font-semibold">Fiktive SEPA-Demo</dd></div></dl></Card><Card className="p-5"><h2 className="font-bold">Sicherheit</h2><ul className="mt-5 space-y-3 text-sm text-slate-600"><li>✓ HttpOnly-Sitzungscookie</li><li>✓ SameSite- und CSRF-Schutz</li><li>✓ Serverseitige Kontoinhaberprüfung</li><li>✓ Idempotente Zahlungsaufträge</li></ul><div className="mt-5 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Die Demo-Bestätigung ist kein echtes TAN- oder SCA-Verfahren.</div></Card></div>;
+}
+
+function AdminPanel() {
+	const [overview, setOverview] = useState<AdminOverview | null>(null);
+	const [amounts, setAmounts] = useState<Record<string, string>>({});
+	const [message, setMessage] = useState("");
+	const [loading, setLoading] = useState(true);
+
+	const load = useCallback(async () => {
+		setLoading(true);
+		try {
+			const result = await getAdminOverview();
+			if (!result.response.ok) throw new Error("Administrationsdaten konnten nicht geladen werden.");
+			setOverview(result.data);
+			setMessage("");
+		} catch (loadError) {
+			setMessage(loadError instanceof Error ? loadError.message : "Administration nicht verfÃ¼gbar.");
+		} finally {
+			setLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		const task = queueMicrotask(() => void load());
+		return () => void task;
+	}, [load]);
+
+	const updateRole = async (userId: string, role: "CUSTOMER" | "ADMIN") => {
+		const result = await updateAdminUserRole(userId, role);
+		if (!result.response.ok) { setMessage("Rolle konnte nicht geÃ¤ndert werden."); return; }
+		await load();
+	};
+	const updateStatus = async (accountId: string, status: "ACTIVE" | "BLOCKED") => {
+		const result = await updateAdminAccountStatus(accountId, status);
+		if (!result.response.ok) { setMessage("Kontostatus konnte nicht geÃ¤ndert werden."); return; }
+		await load();
+	};
+	const adjust = async (accountId: string, operation: "DEPOSIT" | "WITHDRAW") => {
+		const result = await adjustAdminAccountBalance(accountId, operation, amounts[accountId] || "");
+		if (!result.response.ok) { setMessage("Buchung konnte nicht ausgefÃ¼hrt werden."); return; }
+		setAmounts((current) => ({ ...current, [accountId]: "" }));
+		await load();
+	};
+
+	if (loading && !overview) return <Loading />;
+	if (!overview) return <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{message}</div>;
+	return <div className="space-y-6">
+		{message && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}
+		<div className="grid gap-4 sm:grid-cols-3"><Stat label="Benutzer" value={String(overview.users.length)} accent="blue" /><Stat label="Konten" value={String(overview.accounts.length)} accent="green" /><Stat label="ZahlungsauftrÃ¤ge" value={String(overview.payment_count)} accent="amber" /></div>
+		<Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><h2 className="font-bold">Benutzerverwaltung</h2></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Benutzer</th><th className="p-3">Konten</th><th className="p-3">Gesamtsaldo</th><th className="p-3">Rolle</th></tr></thead><tbody className="divide-y divide-slate-100">{overview.users.map((user) => <tr key={user.id}><td className="p-3"><p className="font-semibold">{user.full_name}</p><p className="text-xs text-slate-500">{user.email}</p></td><td className="p-3">{user.account_count}</td><td className="p-3 font-semibold">{formatCurrency(user.total_balance)}</td><td className="p-3"><select aria-label={`Rolle fÃ¼r ${user.email}`} className="bank-input min-w-32" value={user.role} onChange={(event) => void updateRole(user.id, event.target.value as "CUSTOMER" | "ADMIN")}><option value="CUSTOMER">Kunde</option><option value="ADMIN">Admin</option></select></td></tr>)}</tbody></table></div></Card>
+		<Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><h2 className="font-bold">Kontenverwaltung</h2><p className="mt-1 text-xs text-slate-500">Gutschriften und Belastungen werden als ausgeglichene Ledger-Buchungen erfasst.</p></div><div className="divide-y divide-slate-100">{overview.accounts.map((account) => <div key={account.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_1fr_150px_300px] lg:items-center"><div><p className="font-semibold">{account.name}</p><p className="text-xs text-slate-500">{account.owner_name} Â· {account.owner_email}</p><p className="mt-1 font-mono text-xs text-slate-400">{account.iban}</p></div><div><p className="font-bold">{formatCurrency(account.balance)}</p><p className="text-xs text-slate-500">{account.account_type}</p></div><select aria-label={`Status fÃ¼r ${account.name}`} className="bank-input" value={account.status} onChange={(event) => void updateStatus(account.id, event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select><div className="flex gap-2"><input aria-label={`Betrag fÃ¼r ${account.name}`} className="bank-input min-w-0" inputMode="decimal" placeholder="Betrag EUR" value={amounts[account.id] || ""} onChange={(event) => setAmounts((current) => ({ ...current, [account.id]: event.target.value }))} /><button className="rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white" onClick={() => void adjust(account.id, "DEPOSIT")}>+</button><button className="rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white" onClick={() => void adjust(account.id, "WITHDRAW")}>âˆ’</button></div></div>)}</div></Card>
+	</div>;
 }
 
 function Status({ value }: { value: string }) {

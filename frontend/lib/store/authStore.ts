@@ -18,7 +18,8 @@ export interface AuthStore {
   isHydrated: boolean;
 
   // Actions
-  setAuthenticated: (email: string) => void;
+  setAuthenticated: (email: string, role?: "CUSTOMER" | "ADMIN") => void;
+  setRole: (role: "CUSTOMER" | "ADMIN") => void;
   setAccounts: (accounts: Account[]) => void;
   hydrate: () => Promise<void>;
   logout: () => void;
@@ -30,13 +31,17 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   accounts: [],
   isHydrated: false,
 
-  setAuthenticated: (email: string) => {
+  setAuthenticated: (email: string, role = "CUSTOMER") => {
     const normalizedEmail = email.trim().toLowerCase();
-    set({ user: { email: normalizedEmail, authenticated: true } });
+    set({ user: { email: normalizedEmail, authenticated: true, role } });
     if (typeof window !== "undefined") {
       localStorage.setItem(STORAGE_KEYS.EMAIL, normalizedEmail);
     }
   },
+
+  setRole: (role) => set((state) => ({
+    user: state.user ? { ...state.user, role } : state.user,
+  })),
 
   setAccounts: (accounts: Account[]) => {
     set({ accounts: normalizeAccounts(accounts) });
@@ -53,9 +58,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
 
     try {
-      const { response } = await getSession();
+      const { response, data } = await getSession();
       if (response.ok) {
-        set({ user: { email, authenticated: true }, isHydrated: true });
+        set({ user: { email: data.email || email, authenticated: true, role: data.role }, isHydrated: true });
         return;
       }
     } catch {

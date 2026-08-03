@@ -62,6 +62,10 @@ export const API_ENDPOINTS = {
 	STANDING_ORDER: (orderId: string) => `/standing-orders/${orderId}`,
 	BENEFICIARIES: "/beneficiaries",
 	EVENTS: "/events",
+	ADMIN_OVERVIEW: "/admin/overview",
+	ADMIN_USER_ROLE: (userId: string) => `/admin/users/${userId}/role`,
+	ADMIN_ACCOUNT_STATUS: (accountId: string) => `/admin/accounts/${accountId}/status`,
+	ADMIN_ACCOUNT_BALANCE: (accountId: string) => `/admin/accounts/${accountId}/balance`,
   HEALTH: "/health",
 } as const;
 

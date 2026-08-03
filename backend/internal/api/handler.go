@@ -212,7 +212,17 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	respondJSON(w, http.StatusOK, SessionResponse{UserID: userID.String()})
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load user role")
+		return
+	}
+	respondJSON(w, http.StatusOK, SessionResponse{UserID: userID.String(), Email: user.Email, Role: role})
 }
 
 // CreateAccount godoc

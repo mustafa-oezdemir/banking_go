@@ -21,6 +21,10 @@ services:
         value: https://pehlione-banking.com,https://www.pehlione-banking.com,https://pehlione-banking-frontend.onrender.com,https://banking-go.onrender.com
       - key: DEMO_SEED
         value: true
+      - key: ADMIN_SEED_EMAIL
+        value: admin.banking@pehlione.com
+      - key: ADMIN_SEED_PASSWORD
+        sync: false
       - key: ENABLE_IN_PROCESS_SCHEDULER
         value: true
       - key: RUN_DB_MIGRATIONS_ON_START

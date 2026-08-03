@@ -336,6 +336,10 @@ func main() {
 		r.Get("/beneficiaries", h.ListBeneficiaries)
 		r.Post("/beneficiaries", h.CreateBeneficiary)
 		r.Get("/events", h.Events)
+		r.Get("/admin/overview", h.AdminOverview)
+		r.Patch("/admin/users/{id}/role", h.AdminUpdateUserRole)
+		r.Patch("/admin/accounts/{id}/status", h.AdminUpdateAccountStatus)
+		r.Post("/admin/accounts/{id}/balance", h.AdminAdjustAccountBalance)
 	})
 
 	// Free-demo profile: process due orders only while the web service is awake.

@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +30,10 @@ type demoUser struct {
 // SeedDemoData creates a deterministic, fictional data set. Every write uses a
 // unique constraint, a stable idempotency key, or an explicit existence check.
 func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, payments *PaymentService) error {
+	if err := seedConfiguredAdmin(ctx, store, ledger); err != nil {
+		return err
+	}
+
 	anna, err := ensureDemoUser(ctx, store, "anna.beispiel@demo.invalid", "Anna Beispiel", 1000)
 	if err != nil {
 		return err
@@ -97,6 +104,51 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		Frequency: "MONTHLY", StartDate: time.Now().UTC().Add(24 * time.Hour),
 	})
 	return err
+}
+
+func seedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerService) error {
+	email := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_SEED_EMAIL")))
+	password := os.Getenv("ADMIN_SEED_PASSWORD")
+	if email == "" && password == "" {
+		return nil
+	}
+	if email == "" || password == "" {
+		return errors.New("ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be configured together")
+	}
+	if len(password) > 72 {
+		return errors.New("ADMIN_SEED_PASSWORD exceeds bcrypt's 72-byte limit")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash admin seed password: %w", err)
+	}
+	adminID, err := store.UpsertAdminUser(ctx, email, string(hash), "Pehlione Administrator")
+	if err != nil {
+		return fmt.Errorf("seed admin user: %w", err)
+	}
+
+	accounts, err := store.ListAccountsByOwner(ctx, uuid.NullUUID{UUID: adminID, Valid: true})
+	if err != nil {
+		return fmt.Errorf("list admin accounts: %w", err)
+	}
+	var current sqlc.Account
+	for _, account := range accounts {
+		if account.AccountType == "GIROKONTO" {
+			current = account
+			break
+		}
+	}
+	if current.ID == uuid.Nil {
+		current, err = createSeedAccount(ctx, store, adminID, "Pehlione Admin Girokonto", "GIROKONTO", 3000)
+		if err != nil {
+			return fmt.Errorf("seed admin account: %w", err)
+		}
+	}
+	if err = ensureBalance(ctx, ledger, current, "500.00"); err != nil {
+		return fmt.Errorf("seed admin balance: %w", err)
+	}
+	return nil
 }
 
 func ensureSeedPayment(ctx context.Context, store *db.Store, payments *PaymentService, input CreatePaymentInput) error {

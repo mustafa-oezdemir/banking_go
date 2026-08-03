@@ -18,6 +18,7 @@ import type {
 	StandingOrderRequest,
 	Beneficiary,
 	VoPResult,
+	AdminOverview,
 } from "@/lib/types";
 
 /**
@@ -127,6 +128,31 @@ export async function getSession(): Promise<ApiResponse<SessionResponse>> {
  */
 export async function logoutSession(): Promise<ApiResponse<MessageResponse>> {
   return request<MessageResponse>(API_ENDPOINTS.LOGOUT, { method: "POST" });
+}
+
+export async function getAdminOverview(): Promise<ApiResponse<AdminOverview>> {
+	return request<AdminOverview>(API_ENDPOINTS.ADMIN_OVERVIEW);
+}
+
+export async function updateAdminUserRole(userId: string, role: "CUSTOMER" | "ADMIN"): Promise<ApiResponse<MessageResponse>> {
+	return request<MessageResponse>(API_ENDPOINTS.ADMIN_USER_ROLE(userId), {
+		method: "PATCH",
+		body: JSON.stringify({ role }),
+	});
+}
+
+export async function updateAdminAccountStatus(accountId: string, status: "ACTIVE" | "BLOCKED"): Promise<ApiResponse<MessageResponse>> {
+	return request<MessageResponse>(API_ENDPOINTS.ADMIN_ACCOUNT_STATUS(accountId), {
+		method: "PATCH",
+		body: JSON.stringify({ status }),
+	});
+}
+
+export async function adjustAdminAccountBalance(accountId: string, operation: "DEPOSIT" | "WITHDRAW", amount: string): Promise<ApiResponse<MessageResponse>> {
+	return request<MessageResponse>(API_ENDPOINTS.ADMIN_ACCOUNT_BALANCE(accountId), {
+		method: "POST",
+		body: JSON.stringify({ operation, amount }),
+	});
 }
 
 /**

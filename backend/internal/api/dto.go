@@ -51,6 +51,8 @@ type RegisterResponse struct {
 // SessionResponse describes the authenticated browser session.
 type SessionResponse struct {
 	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
 }
 
 // MessageResponse contains a simple status message.

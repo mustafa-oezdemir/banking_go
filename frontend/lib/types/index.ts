@@ -5,6 +5,38 @@
 export interface User {
   email: string;
   authenticated: boolean;
+	role: "CUSTOMER" | "ADMIN";
+}
+
+export interface AdminUser {
+	id: string;
+	email: string;
+	full_name: string;
+	role: "CUSTOMER" | "ADMIN";
+	created_at: string;
+	account_count: number;
+	total_balance: string;
+}
+
+export interface AdminAccount {
+	id: string;
+	owner_id: string;
+	owner_email: string;
+	owner_name: string;
+	name: string;
+	iban: string;
+	account_type: string;
+	status: "ACTIVE" | "BLOCKED";
+	balance: string;
+	available_balance: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface AdminOverview {
+	users: AdminUser[];
+	accounts: AdminAccount[];
+	payment_count: number;
 }
 
 export interface Account {
@@ -148,6 +180,8 @@ export interface RegisterResponse {
 
 export interface SessionResponse {
   user_id: string;
+	email: string;
+	role: "CUSTOMER" | "ADMIN";
 }
 
 export interface MessageResponse {
