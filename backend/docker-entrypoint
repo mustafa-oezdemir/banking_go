@@ -102,7 +102,13 @@ elif [ "${RUN_DB_MIGRATIONS_ON_START:-true}" = "true" ]; then
     fi
 fi
 
-if [ -n "${db_url:-}" ] && [ -z "${DB_URL:-}" ] && [ -z "${DB_HOST:-}" ]; then
+if [ -n "${db_url:-}" ] && [ "${RENDER:-}" = "true" ]; then
+    # The managed URL selected above must also be used by the Go process.
+    # Stale local DB_HOST/DB_PORT values in an existing Render service must
+    # never override the connected PostgreSQL service.
+    export DB_URL="$db_url"
+    unset DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD DB_SSLMODE
+elif [ -n "${db_url:-}" ] && [ -z "${DB_URL:-}" ] && [ -z "${DB_HOST:-}" ]; then
     export DB_URL="$db_url"
 fi
 

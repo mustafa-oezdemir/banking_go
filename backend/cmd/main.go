@@ -95,7 +95,8 @@ func parseAllowedOrigins() []string {
 func resolveDBURL() string {
 	// Prefer explicit, composable settings for local and container deployments.
 	// DB_URL remains supported for managed platforms that provide one connection string.
-	if connStr := resolveDBURLFromParts(); connStr != "" {
+	if connStr := resolveDBURLFromParts(); connStr != "" &&
+		(!isLocalDatabaseURL(connStr) || !strings.EqualFold(strings.TrimSpace(os.Getenv("RENDER")), "true")) {
 		return connStr
 	}
 
@@ -123,10 +124,8 @@ func resolveDBURL() string {
 		return "postgresql://root:secret@localhost:5432/simple_ledger?sslmode=disable" // #nosec G101 - Local development default
 	}
 
-	lower := strings.ToLower(connStr)
 	// Localhost DB URLs are invalid in cloud runtimes; attempt safe fallback automatically.
-	isLocalHostURL := strings.Contains(lower, "@localhost:") || strings.Contains(lower, "@127.0.0.1:") || strings.Contains(lower, "@[::1]:")
-	if isLocalHostURL {
+	if isLocalDatabaseURL(connStr) {
 		for _, envVar := range fallbackVars {
 			if value := strings.TrimSpace(os.Getenv(envVar)); value != "" {
 				return value
@@ -142,6 +141,13 @@ func resolveDBURL() string {
 	}
 
 	return connStr
+}
+
+func isLocalDatabaseURL(connStr string) bool {
+	lower := strings.ToLower(strings.TrimSpace(connStr))
+	return strings.Contains(lower, "@localhost:") ||
+		strings.Contains(lower, "@127.0.0.1:") ||
+		strings.Contains(lower, "@[::1]:")
 }
 
 func resolveDBURLFromParts() string {

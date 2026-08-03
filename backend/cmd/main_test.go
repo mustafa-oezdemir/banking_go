@@ -43,6 +43,26 @@ func TestResolveDBURLPrefersParts(t *testing.T) {
 	}
 }
 
+func TestResolveDBURLIgnoresLocalSettingsOnRender(t *testing.T) {
+	t.Setenv("RENDER", "true")
+	t.Setenv("DB_HOST", "localhost")
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_NAME", "simple_ledger")
+	t.Setenv("DB_USER", "root")
+	t.Setenv("DB_PASSWORD", "local-only")
+	t.Setenv("DB_SSLMODE", "disable")
+	t.Setenv("DB_URL", "postgresql://root:local-only@localhost:5432/simple_ledger")
+	t.Setenv("INTERNAL_DATABASE_URL", "postgresql://managed:secret@render-db.internal:5432/ledger")
+	t.Setenv("RENDER_DATABASE_URL", "")
+	t.Setenv("DATABASE_URL", "")
+
+	got := resolveDBURL()
+	want := "postgresql://managed:secret@render-db.internal:5432/ledger"
+	if got != want {
+		t.Fatalf("resolveDBURL() = %q, want managed Render URL", got)
+	}
+}
+
 func TestDemoSeedConfiguration(t *testing.T) {
 	t.Run("disabled seed does not require a password", func(t *testing.T) {
 		t.Setenv("DEMO_SEED", "false")
