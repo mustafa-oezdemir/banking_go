@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/internal/service"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
@@ -108,6 +109,13 @@ func TestAdminOverviewWithActiveSeededSession(t *testing.T) {
 		t.Context(), "overview-admin-"+uuid.NewString()+"@example.com", "test-only", "Overview Admin",
 	)
 	require.NoError(t, err)
+	rawIBAN, err := sepa.GenerateGermanDemoIBAN()
+	require.NoError(t, err)
+	adminAccount, err := h.store.CreateAccount(t.Context(), sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: adminID, Valid: true}, Name: "Overview Account", Currency: "EUR",
+		Iban: rawIBAN, AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
 	version, err := h.store.GetUserSessionVersion(t.Context(), adminID)
 	require.NoError(t, err)
 	token, err := GenerateTokenForVersion(adminID, version)
@@ -126,6 +134,13 @@ func TestAdminOverviewWithActiveSeededSession(t *testing.T) {
 	var overview adminOverviewResponse
 	require.NoError(t, json.NewDecoder(rw.Body).Decode(&overview))
 	require.NotEmpty(t, overview.Users)
+	for _, account := range overview.Accounts {
+		if account.ID == adminAccount.ID.String() {
+			require.Equal(t, sepa.MaskIBAN(rawIBAN), account.MaskedIBAN)
+			return
+		}
+	}
+	t.Fatal("seeded admin account was missing from overview")
 }
 
 func TestValidateAccountName(t *testing.T) {

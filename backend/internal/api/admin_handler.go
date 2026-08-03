@@ -12,6 +12,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 )
 
 type adminUserResponse struct {
@@ -32,7 +34,7 @@ type adminAccountResponse struct {
 	OwnerEmail       string    `json:"owner_email"`
 	OwnerName        string    `json:"owner_name"`
 	Name             string    `json:"name"`
-	IBAN             string    `json:"iban"`
+	MaskedIBAN       string    `json:"masked_iban"`
 	AccountType      string    `json:"account_type"`
 	Status           string    `json:"status"`
 	Balance          string    `json:"balance"`
@@ -91,7 +93,7 @@ func (h *Handler) AdminOverview(w http.ResponseWriter, r *http.Request) {
 	for _, account := range accounts {
 		accountResponses = append(accountResponses, adminAccountResponse{
 			ID: account.ID.String(), OwnerID: account.OwnerID.String(), OwnerEmail: account.OwnerEmail,
-			OwnerName: account.OwnerName, Name: account.Name, IBAN: account.IBAN,
+			OwnerName: account.OwnerName, Name: account.Name, MaskedIBAN: sepa.MaskIBAN(account.IBAN),
 			AccountType: account.AccountType, Status: account.Status, Balance: account.Balance,
 			AvailableBalance: account.AvailableBalance, CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt,
 		})

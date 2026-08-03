@@ -24,7 +24,7 @@ export interface AdminAccount {
 	owner_email: string;
 	owner_name: string;
 	name: string;
-	iban: string;
+	masked_iban: string;
 	account_type: string;
 	status: "ACTIVE" | "BLOCKED";
 	balance: string;
