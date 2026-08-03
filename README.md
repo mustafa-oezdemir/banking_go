@@ -2,6 +2,8 @@
 
 A simulation-only banking application built with Go, PostgreSQL and Next.js. It models German IBANs, SEPA-style payments, instant and scheduled transfers, standing orders, Verification of Payee (VoP), SSE updates and an atomic double-entry ledger.
 
+**Author and maintainer:** Mustafa Özdemir
+
 > **Demo-Banking – kein echtes Bankkonto.** This project does not connect to SEPA, PSD2, a bank, or a payment provider. It never moves real money and must not be presented as regulated, BaFin-approved, or PSD2-compliant banking software.
 
 ## What is included
