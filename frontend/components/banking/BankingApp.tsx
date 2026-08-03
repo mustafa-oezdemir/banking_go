@@ -59,6 +59,23 @@ export function BankingApp() {
 		[role],
 	);
 
+	useEffect(() => {
+		const desktop = window.matchMedia("(min-width: 1024px)");
+		const syncDrawer = () => setMenuOpen(desktop.matches);
+		syncDrawer();
+		desktop.addEventListener("change", syncDrawer);
+		return () => desktop.removeEventListener("change", syncDrawer);
+	}, []);
+
+	useEffect(() => {
+		if (!menuOpen) return;
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setMenuOpen(false);
+		};
+		window.addEventListener("keydown", closeOnEscape);
+		return () => window.removeEventListener("keydown", closeOnEscape);
+	}, [menuOpen]);
+
 	const loadAll = useCallback(async () => {
 		try {
 			const sessionResult = await getSession();
@@ -125,6 +142,10 @@ export function BankingApp() {
 	const expenses = recentEntries.reduce((sum, entry) => sum + Number(entry.debit), 0);
 	const pending = payments.filter((payment) => ["AWAITING_CONFIRMATION", "SCHEDULED", "PROCESSING"].includes(payment.status));
 	const selectedLabel = navigation.find((item) => item.id === view)?.label ?? "Übersicht";
+	const selectView = (nextView: View) => {
+		setView(nextView);
+		if (!window.matchMedia("(min-width: 1024px)").matches) setMenuOpen(false);
+	};
 
 	return (
 		<div className="min-h-screen bg-[#f3f5f7] text-[#17212b]">
@@ -133,7 +154,16 @@ export function BankingApp() {
 			</div>
 			<header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
 				<div className="flex items-center gap-3">
-					<button className="rounded-lg p-2 lg:hidden" aria-label="Navigation öffnen" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+					<button
+						type="button"
+						className="flex h-10 w-10 items-center justify-center rounded-lg text-2xl leading-none text-[#003b70] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0077b6]"
+						aria-controls="banking-navigation-drawer"
+						aria-expanded={menuOpen}
+						aria-label={menuOpen ? "Navigation schließen" : "Navigation öffnen"}
+						onClick={() => setMenuOpen((open) => !open)}
+					>
+						<span aria-hidden="true">{menuOpen ? "×" : "☰"}</span>
+					</button>
 					<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#003b70] text-lg font-bold text-white">P</div>
 					<div><div className="font-bold text-[#003b70]">Pehlione DemoBank</div><div className="text-[11px] text-slate-500">SEPA-Simulation</div></div>
 				</div>
@@ -143,12 +173,26 @@ export function BankingApp() {
 					<button onClick={signOut} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Abmelden</button>
 				</div>
 			</header>
+			{menuOpen && (
+				<button
+					type="button"
+					aria-label="Navigation schließen"
+					className="fixed inset-x-0 bottom-0 top-[97px] z-30 bg-slate-950/30 backdrop-blur-[1px] lg:hidden"
+					onClick={() => setMenuOpen(false)}
+				/>
+			)}
 			<div className="mx-auto flex max-w-[1600px]">
-				<aside className={`${menuOpen ? "fixed inset-y-0 left-0 z-40 mt-[97px] block shadow-xl" : "hidden"} min-h-[calc(100vh-97px)] w-64 shrink-0 border-r border-slate-200 bg-white p-4 lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-64px)]`}>
-					<nav aria-label="Hauptnavigation" className="space-y-1">
-						{navigation.map((item) => <button key={item.id} onClick={() => { setView(item.id); setMenuOpen(false); }} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${view === item.id ? "bg-[#e8f1f8] font-semibold text-[#003b70]" : "text-slate-600 hover:bg-slate-50"}`}><span className="w-5 text-center text-lg">{item.icon}</span>{item.label}</button>)}
-					</nav>
-					<div className="mt-8 rounded-xl bg-slate-50 p-3 text-xs text-slate-500"><strong className="block text-slate-700">Nur Demo</strong>IBANs und Umsätze sind vollständig fiktiv.</div>
+				<aside
+					id="banking-navigation-drawer"
+					aria-hidden={!menuOpen}
+					className={`fixed bottom-0 left-0 top-[97px] z-40 shrink-0 overflow-x-hidden overflow-y-auto border-r border-slate-200 bg-white shadow-xl transition-[width,transform,padding] duration-300 ease-out lg:sticky lg:top-16 lg:h-[calc(100vh-64px)] lg:shadow-none ${menuOpen ? "w-72 translate-x-0 p-4 lg:w-64" : "pointer-events-none w-72 -translate-x-full p-4 lg:w-0 lg:translate-x-0 lg:border-r-0 lg:p-0"}`}
+				>
+					<div className="min-w-56">
+						<nav aria-label="Hauptnavigation" className="space-y-1">
+							{navigation.map((item) => <button key={item.id} tabIndex={menuOpen ? 0 : -1} onClick={() => selectView(item.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${view === item.id ? "bg-[#e8f1f8] font-semibold text-[#003b70]" : "text-slate-600 hover:bg-slate-50"}`}><span className="w-5 text-center text-lg">{item.icon}</span>{item.label}</button>)}
+						</nav>
+						<div className="mt-8 rounded-xl bg-slate-50 p-3 text-xs text-slate-500"><strong className="block text-slate-700">Nur Demo</strong>IBANs und Umsätze sind vollständig fiktiv.</div>
+					</div>
 				</aside>
 				<main className="min-w-0 flex-1 p-4 md:p-6 lg:p-8">
 					<div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm text-slate-500">Online-Banking</p><h1 className="text-2xl font-bold tracking-tight md:text-3xl">{selectedLabel}</h1></div><p className="text-xs text-slate-500">Stand: {new Date().toLocaleString("de-DE")}</p></div>
