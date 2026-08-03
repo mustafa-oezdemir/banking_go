@@ -76,14 +76,8 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Verkehrsbetriebe", BeneficiaryIBAN: transitIBAN, Amount: "49.00", TransferType: PaymentStandard, ScheduleType: ScheduleScheduled, Purpose: "Deutschlandticket", RequestedExecution: time.Now().UTC().Add(72 * time.Hour), IdempotencyKey: "demo-seed-scheduled-v1"},
 	}
 	for _, input := range paymentsToCreate {
-		created, createErr := payments.CreatePayment(ctx, input)
-		if createErr != nil {
-			return fmt.Errorf("seed payment: %w", createErr)
-		}
-		if created.Order.Status == PaymentAwaitingConfirmation {
-			if _, confirmErr := payments.ConfirmPayment(ctx, anna.user.ID, created.Order.ID, created.Order.VopResult != VoPMatch); confirmErr != nil {
-				return fmt.Errorf("confirm seed payment: %w", confirmErr)
-			}
+		if err = ensureSeedPayment(ctx, store, payments, input); err != nil {
+			return err
 		}
 	}
 
@@ -103,6 +97,28 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		Frequency: "MONTHLY", StartDate: time.Now().UTC().Add(24 * time.Hour),
 	})
 	return err
+}
+
+func ensureSeedPayment(ctx context.Context, store *db.Store, payments *PaymentService, input CreatePaymentInput) error {
+	order, err := store.GetPaymentOrderByIdempotency(ctx, sqlc.GetPaymentOrderByIdempotencyParams{
+		OwnerID: input.OwnerID, IdempotencyKey: input.IdempotencyKey,
+	})
+	if err == sql.ErrNoRows {
+		created, createErr := payments.CreatePayment(ctx, input)
+		if createErr != nil {
+			return fmt.Errorf("seed payment: %w", createErr)
+		}
+		order = created.Order
+	} else if err != nil {
+		return fmt.Errorf("find seed payment: %w", err)
+	}
+
+	if order.Status == PaymentAwaitingConfirmation {
+		if _, err = payments.ConfirmPayment(ctx, input.OwnerID, order.ID, order.VopResult != VoPMatch); err != nil {
+			return fmt.Errorf("confirm seed payment: %w", err)
+		}
+	}
+	return nil
 }
 
 func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string, accountBase uint64) (demoUser, error) {
