@@ -1,23 +1,5 @@
 import type { NextConfig } from "next";
 
-const contentSecurityPolicyDirectives = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
-	"style-src 'self' 'unsafe-inline'",
-	"font-src 'self' data:",
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  "worker-src 'self' blob:",
-];
-if (process.env.NODE_ENV === "production") {
-  contentSecurityPolicyDirectives.push("upgrade-insecure-requests");
-}
-const contentSecurityPolicy = contentSecurityPolicyDirectives.join("; ");
-
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
@@ -25,7 +7,6 @@ const nextConfig: NextConfig = {
     {
       source: "/(.*)",
       headers: [
-        { key: "Content-Security-Policy", value: contentSecurityPolicy },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "X-Frame-Options", value: "DENY" },
@@ -111,6 +92,10 @@ const nextConfig: NextConfig = {
 			source: "/events",
 			destination: `${apiBaseUrl}/events`,
 		},
+        {
+          source: "/admin/:path*",
+          destination: `${apiBaseUrl}/admin/:path*`,
+        },
         // Proxy swagger docs to Go backend
         {
           source: "/swagger/:path*",

@@ -20,7 +20,9 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         value: https://pehlione-banking.com,https://www.pehlione-banking.com,https://pehlione-banking-frontend.onrender.com,https://banking-go.onrender.com
       - key: DEMO_SEED
-        value: true
+        value: false
+      - key: DEMO_SEED_PASSWORD
+        sync: false
       - key: ADMIN_SEED_EMAIL
         value: admin.banking@pehlione.com
       - key: ADMIN_SEED_PASSWORD

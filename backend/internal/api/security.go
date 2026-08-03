@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -8,7 +10,92 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/google/uuid"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/db"
 )
+
+// RequireActiveSession rejects cryptographically valid JWTs revoked by logout or role changes.
+func RequireActiveSession(store *db.Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userID, err := authenticatedUserID(r)
+			if err != nil {
+				respondError(w, http.StatusUnauthorized, "invalid token")
+				return
+			}
+			version, err := tokenSessionVersion(r)
+			if err != nil {
+				respondError(w, http.StatusUnauthorized, "invalid token")
+				return
+			}
+			persisted, err := store.GetUserSessionVersion(r.Context(), userID)
+			if err != nil || persisted != version {
+				respondError(w, http.StatusUnauthorized, "session expired")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func tokenSessionVersion(r *http.Request) (int64, error) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		return 0, err
+	}
+	switch value := claims["session_version"].(type) {
+	case float64:
+		return int64(value), nil
+	case int64:
+		return value, nil
+	case json.Number:
+		return value.Int64()
+	default:
+		return 0, errors.New("session_version claim missing")
+	}
+}
+
+func tokenExpiry(r *http.Request) (time.Time, error) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		return time.Time{}, err
+	}
+	var seconds int64
+	switch value := claims["exp"].(type) {
+	case float64:
+		seconds = int64(value)
+	case int64:
+		seconds = value
+	case json.Number:
+		seconds, err = value.Int64()
+	default:
+		err = errors.New("exp claim missing")
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(seconds, 0), nil
+}
+
+func revokeAuthenticatedSession(store *db.Store, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		return
+	}
+	raw, ok := claims["user_id"].(string)
+	if !ok {
+		return
+	}
+	userID, err := uuid.Parse(raw)
+	if err == nil {
+		if revokeErr := store.RevokeUserSessions(r.Context(), userID); revokeErr != nil {
+			return
+		}
+	}
+}
 
 const csrfHeaderName = "X-CSRF-Protection"
 

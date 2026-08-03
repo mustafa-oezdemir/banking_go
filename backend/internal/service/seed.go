@@ -18,8 +18,6 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
-const demoPassword = "Demo-Banking-2026!"
-
 //nolint:govet // Group the user and both demo accounts by domain meaning.
 type demoUser struct {
 	user    sqlc.User
@@ -30,15 +28,20 @@ type demoUser struct {
 // SeedDemoData creates a deterministic, fictional data set. Every write uses a
 // unique constraint, a stable idempotency key, or an explicit existence check.
 func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, payments *PaymentService) error {
-	if err := seedConfiguredAdmin(ctx, store, ledger); err != nil {
-		return err
+	demoPassword := os.Getenv("DEMO_SEED_PASSWORD")
+	if len(demoPassword) < 15 || len(demoPassword) > 72 {
+		return errors.New("DEMO_SEED_PASSWORD must contain between 15 and 72 bytes")
+	}
+	demoHash, err := bcrypt.GenerateFromPassword([]byte(demoPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash demo seed password: %w", err)
 	}
 
-	anna, err := ensureDemoUser(ctx, store, "anna.beispiel@demo.invalid", "Anna Beispiel", 1000)
+	anna, err := ensureDemoUser(ctx, store, "anna.beispiel@demo.invalid", "Anna Beispiel", 1000, string(demoHash))
 	if err != nil {
 		return err
 	}
-	maxUser, err := ensureDemoUser(ctx, store, "max.mustermann@demo.invalid", "Max Mustermann", 2000)
+	maxUser, err := ensureDemoUser(ctx, store, "max.mustermann@demo.invalid", "Max Mustermann", 2000, string(demoHash))
 	if err != nil {
 		return err
 	}
@@ -106,7 +109,8 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 	return err
 }
 
-func seedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerService) error {
+// SeedConfiguredAdmin provisions the explicitly configured administrator independently of demo data.
+func SeedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerService) error {
 	email := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_SEED_EMAIL")))
 	password := os.Getenv("ADMIN_SEED_PASSWORD")
 	if email == "" && password == "" {
@@ -115,8 +119,8 @@ func seedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerSer
 	if email == "" || password == "" {
 		return errors.New("ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be configured together")
 	}
-	if len(password) > 72 {
-		return errors.New("ADMIN_SEED_PASSWORD exceeds bcrypt's 72-byte limit")
+	if len(password) < 15 || len(password) > 72 {
+		return errors.New("ADMIN_SEED_PASSWORD must contain between 15 and 72 bytes")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -140,7 +144,7 @@ func seedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerSer
 		}
 	}
 	if current.ID == uuid.Nil {
-		current, err = createSeedAccount(ctx, store, adminID, "Pehlione Admin Girokonto", "GIROKONTO", 3000)
+		current, err = createConfiguredAdminAccount(ctx, store, adminID)
 		if err != nil {
 			return fmt.Errorf("seed admin account: %w", err)
 		}
@@ -149,6 +153,17 @@ func seedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerSer
 		return fmt.Errorf("seed admin balance: %w", err)
 	}
 	return nil
+}
+
+func createConfiguredAdminAccount(ctx context.Context, store *db.Store, ownerID uuid.UUID) (sqlc.Account, error) {
+	iban, err := sepa.GenerateGermanDemoIBAN()
+	if err != nil {
+		return sqlc.Account{}, err
+	}
+	return store.CreateAccount(ctx, sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: ownerID, Valid: true}, Name: "Pehlione Admin Girokonto", Currency: "EUR",
+		IsSystem: false, Iban: iban, AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
 }
 
 func ensureSeedPayment(ctx context.Context, store *db.Store, payments *PaymentService, input CreatePaymentInput) error {
@@ -173,14 +188,10 @@ func ensureSeedPayment(ctx context.Context, store *db.Store, payments *PaymentSe
 	return nil
 }
 
-func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string, accountBase uint64) (demoUser, error) {
+func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string, accountBase uint64, passwordHash string) (demoUser, error) {
 	user, err := store.GetUserByEmail(ctx, email)
 	if err == sql.ErrNoRows {
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(demoPassword), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return demoUser{}, hashErr
-		}
-		created, createErr := store.CreateUser(ctx, sqlc.CreateUserParams{Email: email, HashedPassword: string(hash), FullName: fullName})
+		created, createErr := store.CreateUser(ctx, sqlc.CreateUserParams{Email: email, HashedPassword: passwordHash, FullName: fullName})
 		if createErr != nil {
 			return demoUser{}, createErr
 		}

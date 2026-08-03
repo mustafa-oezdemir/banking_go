@@ -235,8 +235,14 @@ func main() {
 	ledgerSvc := service.NewLedgerService(store)
 	eventHub := service.NewEventHub()
 	paymentSvc := service.NewPaymentService(store, eventHub)
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if seedErr := service.SeedConfiguredAdmin(seedCtx, store, ledgerSvc); seedErr != nil {
+		seedCancel()
+		zlog.Fatal().Err(seedErr).Msg("Configured administrator seed failed")
+	}
+	seedCancel()
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("DEMO_SEED")), "true") {
-		seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		seedCtx, seedCancel = context.WithTimeout(context.Background(), 30*time.Second)
 		if seedErr := service.SeedDemoData(seedCtx, store, ledgerSvc, paymentSvc); seedErr != nil {
 			seedCancel()
 			zlog.Fatal().Err(seedErr).Msg("Demo seed failed")
@@ -282,7 +288,7 @@ func main() {
 	authRateLimit := api.NewIPRateLimiter(10, time.Minute)
 	r.With(authRateLimit).Post("/register", h.Register)
 	r.With(authRateLimit).Post("/login", h.Login)
-	r.Post("/logout", h.Logout)
+	r.With(jwtauth.Verifier(api.TokenAuth)).Post("/logout", h.Logout)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		// Health returns service liveness plus lightweight runtime metadata.
 		zlog.Info().Msg("Health check requested")
@@ -306,6 +312,7 @@ func main() {
 		// Apply JWT verification only to protected business endpoints.
 		r.Use(jwtauth.Verifier(api.TokenAuth))
 		r.Use(jwtauth.Authenticator(api.TokenAuth))
+		r.Use(api.RequireActiveSession(store))
 
 		r.Get("/session", h.Session)
 		r.Post("/accounts", h.CreateAccount)
@@ -313,8 +320,6 @@ func main() {
 		r.Get("/accounts/{id}", h.GetAccount)
 		r.Put("/accounts/{id}", h.UpdateAccount)
 		r.Delete("/accounts/{id}", h.DeleteAccount)
-		r.Post("/accounts/{id}/deposit", h.Deposit)
-		r.Post("/accounts/{id}/withdraw", h.Withdraw)
 		r.Post("/transfers", h.Transfer)
 		r.Get("/accounts/{id}/entries", h.GetEntries)
 		r.Get("/accounts/{id}/transactions", h.ListAccountTransactions)

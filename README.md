@@ -55,14 +55,12 @@ To load fictional, repeat-safe demo data:
 
 ```env
 DEMO_SEED=true
+DEMO_SEED_PASSWORD=<unique-secret-with-at-least-15-bytes>
 ```
 
-Seed accounts:
-
-| User | Password |
-| --- | --- |
-| `anna.beispiel@demo.invalid` | `Demo-Banking-2026!` |
-| `max.mustermann@demo.invalid` | `Demo-Banking-2026!` |
+The seed creates the fictional users `anna.beispiel@demo.invalid` and
+`max.mustermann@demo.invalid`; both use the deployment secret supplied through
+`DEMO_SEED_PASSWORD`. Never reuse that secret for a real account.
 
 The `.invalid` domain and all names, balances and transactions are fictional. Set `DEMO_SEED=false` outside an isolated demo.
 

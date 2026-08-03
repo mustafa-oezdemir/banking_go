@@ -54,19 +54,25 @@ func InitTokenAuth(secret string) error {
 
 // GenerateToken creates a signed JWT for the given user ID.
 func GenerateToken(userID uuid.UUID) (string, error) {
+	return GenerateTokenForVersion(userID, 0)
+}
+
+// GenerateTokenForVersion creates a token bound to the user's current server-side session generation.
+func GenerateTokenForVersion(userID uuid.UUID, sessionVersion int64) (string, error) {
 	if TokenAuth == nil {
 		return "", errors.New("token auth is not initialized")
 	}
 
 	// Include user identity and expiry in signed JWT claims.
 	claims := map[string]interface{}{
-		"user_id": userID.String(),
-		"iss":     tokenIssuer,
-		"aud":     tokenAudience,
-		"jti":     uuid.NewString(),
-		"iat":     time.Now().Unix(),
-		"nbf":     time.Now().Add(-time.Minute).Unix(),
-		"exp":     time.Now().Add(sessionDuration).Unix(),
+		"user_id":         userID.String(),
+		"session_version": sessionVersion,
+		"iss":             tokenIssuer,
+		"aud":             tokenAudience,
+		"jti":             uuid.NewString(),
+		"iat":             time.Now().Unix(),
+		"nbf":             time.Now().Add(-time.Minute).Unix(),
+		"exp":             time.Now().Add(sessionDuration).Unix(),
 	}
 	_, tokenString, err := TokenAuth.Encode(claims)
 	return tokenString, err

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -125,7 +126,7 @@ func (h *Handler) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "you cannot remove your own administrator role")
 		return
 	}
-	if err = h.store.UpdateUserRole(r.Context(), userID, input.Role); err != nil {
+	if err = h.store.UpdateUserRole(r.Context(), adminID, userID, input.Role, chimiddleware.GetReqID(r.Context())); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, sql.ErrNoRows) {
 			status = http.StatusNotFound
@@ -138,7 +139,8 @@ func (h *Handler) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 
 // AdminUpdateAccountStatus activates or blocks any customer account.
 func (h *Handler) AdminUpdateAccountStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	adminID, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -158,7 +160,7 @@ func (h *Handler) AdminUpdateAccountStatus(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusBadRequest, "status must be ACTIVE or BLOCKED")
 		return
 	}
-	if err = h.store.UpdateAdminAccountStatus(r.Context(), accountID, input.Status); err != nil {
+	if err = h.store.UpdateAdminAccountStatus(r.Context(), adminID, accountID, input.Status, chimiddleware.GetReqID(r.Context())); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, sql.ErrNoRows) {
 			status = http.StatusNotFound
@@ -171,7 +173,8 @@ func (h *Handler) AdminUpdateAccountStatus(w http.ResponseWriter, r *http.Reques
 
 // AdminAdjustAccountBalance posts an audited double-entry deposit or withdrawal.
 func (h *Handler) AdminAdjustAccountBalance(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	adminID, ok := h.requireAdmin(w, r)
+	if !ok {
 		return
 	}
 	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -192,15 +195,17 @@ func (h *Handler) AdminAdjustAccountBalance(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusBadRequest, "amount must be a positive EUR value with at most two decimals")
 		return
 	}
-	switch strings.ToUpper(strings.TrimSpace(input.Operation)) {
+	operation := strings.ToUpper(strings.TrimSpace(input.Operation))
+	switch operation {
 	case "DEPOSIT":
-		err = h.ledger.Deposit(r.Context(), accountID, amount.StringFixed(2))
 	case "WITHDRAW":
-		err = h.ledger.Withdraw(r.Context(), accountID, amount.StringFixed(2))
 	default:
 		respondError(w, http.StatusBadRequest, "operation must be DEPOSIT or WITHDRAW")
 		return
 	}
+	err = h.ledger.AdjustBalanceAsAdmin(
+		r.Context(), adminID, accountID, operation, amount.StringFixed(2), chimiddleware.GetReqID(r.Context()),
+	)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return

@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -99,4 +104,32 @@ func TestRequireJSON(t *testing.T) {
 	rw := httptest.NewRecorder()
 	handler.ServeHTTP(rw, req)
 	assert.Equal(t, http.StatusUnsupportedMediaType, rw.Code)
+}
+
+func TestRequireActiveSessionRejectsRevokedToken(t *testing.T) {
+	h := setupTestHandler(t)
+	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
+	user, err := h.store.CreateUser(t.Context(), sqlc.CreateUserParams{
+		Email: "session-" + uuid.NewString() + "@example.com", HashedPassword: "test-only", FullName: "Session Test",
+	})
+	require.NoError(t, err)
+	token, err := GenerateTokenForVersion(user.ID, 0)
+	require.NoError(t, err)
+
+	router := chi.NewRouter()
+	router.Use(jwtauth.Verifier(TokenAuth))
+	router.Use(jwtauth.Authenticator(TokenAuth))
+	router.Use(RequireActiveSession(h.store))
+	router.Get("/protected", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	require.Equal(t, http.StatusNoContent, request().Code)
+	require.NoError(t, h.store.RevokeUserSessions(t.Context(), user.ID))
+	require.Equal(t, http.StatusUnauthorized, request().Code)
 }

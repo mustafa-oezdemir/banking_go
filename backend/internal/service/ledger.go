@@ -26,6 +26,8 @@ var (
 	ErrCurrencyMismatch = errors.New("currency mismatch")
 	// ErrAccountNotFound is returned when an expected account does not exist.
 	ErrAccountNotFound = errors.New("account not found")
+	// ErrSystemAccount is returned when a customer operation targets an internal ledger account.
+	ErrSystemAccount = errors.New("system accounts cannot be used for customer operations")
 )
 
 // LedgerService coordinates double-entry operations on accounts.
@@ -47,75 +49,81 @@ func (s *LedgerService) Deposit(ctx context.Context, accountID uuid.UUID, amount
 	}
 
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
-		// Step 2: Lock settlement + target account rows for this transaction.
-		settlement, err := q.GetSettlementAccountForUpdate(ctx)
-		if err != nil {
-			return fmt.Errorf("settlement account not found: %w", err)
-		}
-
-		account, err := q.GetAccountForUpdate(ctx, accountID)
-		if err != nil {
-			return fmt.Errorf("account not found: %w", err)
-		}
-
-		if account.Currency != settlement.Currency {
-			return ErrCurrencyMismatch
-		}
-
-		// Step 3: Use one transaction ID to tie both ledger legs together.
-		txID := uuid.New()
-
-		// 1. Credit user account (entry)
-		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     accountID,
-			Debit:         decimal.Zero.StringFixed(4),
-			Credit:        amount.StringFixed(4),
-			TransactionID: txID,
-			OperationType: "deposit",
-			Description:   sql.NullString{String: "External deposit", Valid: true},
-		})
-		if err != nil {
-			return err
-		}
-
-		// 2. Debit settlement (opposing entry)
-		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     settlement.ID,
-			Debit:         amount.StringFixed(4),
-			Credit:        decimal.Zero.StringFixed(4),
-			TransactionID: txID,
-			OperationType: "deposit",
-			Description:   sql.NullString{String: fmt.Sprintf("Deposit to account %s", accountID), Valid: true},
-		})
-		if err != nil {
-			return err
-		}
-
-		// 3. Update cached balances atomically in the same DB transaction.
-		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.StringFixed(4),
-			ID:      accountID,
-		})
-		if err != nil {
-			return err
-		}
-
-		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.Neg().StringFixed(4),
-			ID:      settlement.ID,
-		})
-		if err != nil {
-			return err
-		}
-
-		log.Info().
-			Str("tx_id", txID.String()).
-			Str("account_id", accountID.String()).
-			Str("amount", amount.StringFixed(4)).
-			Msg("Deposit completed")
-
-		return nil
+		return s.depositTx(ctx, q, accountID, amount)
 	})
+}
+
+func (s *LedgerService) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+	// Step 2: Lock settlement + target account rows for this transaction.
+	settlement, err := q.GetSettlementAccountForUpdate(ctx)
+	if err != nil {
+		return fmt.Errorf("settlement account not found: %w", err)
+	}
+
+	account, err := q.GetAccountForUpdate(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("account not found: %w", err)
+	}
+	if account.IsSystem {
+		return ErrSystemAccount
+	}
+	if account.Status != "ACTIVE" {
+		return ErrAccountBlocked
+	}
+
+	if account.Currency != settlement.Currency {
+		return ErrCurrencyMismatch
+	}
+
+	// Step 3: Use one transaction ID to tie both ledger legs together.
+	txID := uuid.New()
+
+	// 1. Credit user account (entry)
+	_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
+		AccountID:     accountID,
+		Debit:         decimal.Zero.StringFixed(4),
+		Credit:        amount.StringFixed(4),
+		TransactionID: txID,
+		OperationType: "deposit",
+		Description:   sql.NullString{String: "External deposit", Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Debit settlement (opposing entry)
+	_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
+		AccountID:     settlement.ID,
+		Debit:         amount.StringFixed(4),
+		Credit:        decimal.Zero.StringFixed(4),
+		TransactionID: txID,
+		OperationType: "deposit",
+		Description:   sql.NullString{String: fmt.Sprintf("Deposit to account %s", accountID), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	// 3. Update cached balances atomically in the same DB transaction.
+	err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: amount.StringFixed(4),
+		ID:      accountID,
+	})
+	if err != nil {
+		return err
+	}
+
+	err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: amount.Neg().StringFixed(4),
+		ID:      settlement.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Info().Str("tx_id", txID.String()).Msg("Deposit completed")
+
+	return nil
 }
 
 // Withdraw external money from user account
@@ -127,83 +135,125 @@ func (s *LedgerService) Withdraw(ctx context.Context, accountID uuid.UUID, amoun
 	}
 
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
-		// Step 2: Lock settlement + user account to prevent concurrent balance races.
-		settlement, err := q.GetSettlementAccountForUpdate(ctx)
-		if err != nil {
-			return fmt.Errorf("settlement account not found: %w", err)
+		return s.withdrawTx(ctx, q, accountID, amount)
+	})
+}
+
+func (s *LedgerService) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+	// Step 2: Lock settlement + user account to prevent concurrent balance races.
+	settlement, err := q.GetSettlementAccountForUpdate(ctx)
+	if err != nil {
+		return fmt.Errorf("settlement account not found: %w", err)
+	}
+
+	account, err := q.GetAccountForUpdate(ctx, accountID)
+	if err != nil {
+		return fmt.Errorf("account not found: %w", err)
+	}
+	if account.IsSystem {
+		return ErrSystemAccount
+	}
+	if account.Status != "ACTIVE" {
+		return ErrAccountBlocked
+	}
+
+	if account.Currency != settlement.Currency {
+		return ErrCurrencyMismatch
+	}
+
+	balanceDec, err := decimal.NewFromString(account.Balance)
+	if err != nil {
+		return errors.New("invalid balance")
+	}
+
+	if balanceDec.LessThan(amount) {
+		// Business invariant: withdrawals cannot overdraw user funds.
+		return ErrInsufficientFunds
+	}
+
+	txID := uuid.New()
+
+	// 1. Debit user
+	_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
+		AccountID:     accountID,
+		Debit:         amount.StringFixed(4),
+		Credit:        decimal.Zero.StringFixed(4),
+		TransactionID: txID,
+		OperationType: "withdrawal",
+		Description:   sql.NullString{String: "External withdrawal", Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Credit settlement
+	_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
+		AccountID:     settlement.ID,
+		Debit:         decimal.Zero.StringFixed(4),
+		Credit:        amount.StringFixed(4),
+		TransactionID: txID,
+		OperationType: "withdrawal",
+		Description:   sql.NullString{String: fmt.Sprintf("Withdrawal from %s", accountID), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	// 3. Update cached balances after entries are written.
+	err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: amount.Neg().StringFixed(4),
+		ID:      accountID,
+	})
+	if err != nil {
+		return err
+	}
+
+	err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: amount.StringFixed(4),
+		ID:      settlement.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	log.Info().Str("tx_id", txID.String()).Msg("Withdrawal completed")
+
+	return nil
+}
+
+// AdjustBalanceAsAdmin performs the ledger mutation and actor-aware audit insert atomically.
+func (s *LedgerService) AdjustBalanceAsAdmin(
+	ctx context.Context,
+	actorID, accountID uuid.UUID,
+	operation, amountStr, requestID string,
+) error {
+	amount, err := validatePositiveAmount(amountStr)
+	if err != nil {
+		return err
+	}
+	if operation != "DEPOSIT" && operation != "WITHDRAW" {
+		return errors.New("unsupported balance operation")
+	}
+
+	return s.store.ExecTxWithHandle(ctx, func(q *sqlc.Queries, executor sqlc.DBTX) error {
+		before, txErr := q.GetAccount(ctx, accountID)
+		if txErr != nil {
+			return txErr
 		}
-
-		account, err := q.GetAccountForUpdate(ctx, accountID)
-		if err != nil {
-			return fmt.Errorf("account not found: %w", err)
+		if operation == "DEPOSIT" {
+			txErr = s.depositTx(ctx, q, accountID, amount)
+		} else {
+			txErr = s.withdrawTx(ctx, q, accountID, amount)
 		}
-
-		if account.Currency != settlement.Currency {
-			return ErrCurrencyMismatch
+		if txErr != nil {
+			return txErr
 		}
-
-		balanceDec, err := decimal.NewFromString(account.Balance)
-		if err != nil {
-			return errors.New("invalid balance")
+		after, txErr := q.GetAccount(ctx, accountID)
+		if txErr != nil {
+			return txErr
 		}
-
-		if balanceDec.LessThan(amount) {
-			// Business invariant: withdrawals cannot overdraw user funds.
-			return ErrInsufficientFunds
-		}
-
-		txID := uuid.New()
-
-		// 1. Debit user
-		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     accountID,
-			Debit:         amount.StringFixed(4),
-			Credit:        decimal.Zero.StringFixed(4),
-			TransactionID: txID,
-			OperationType: "withdrawal",
-			Description:   sql.NullString{String: "External withdrawal", Valid: true},
-		})
-		if err != nil {
-			return err
-		}
-
-		// 2. Credit settlement
-		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     settlement.ID,
-			Debit:         decimal.Zero.StringFixed(4),
-			Credit:        amount.StringFixed(4),
-			TransactionID: txID,
-			OperationType: "withdrawal",
-			Description:   sql.NullString{String: fmt.Sprintf("Withdrawal from %s", accountID), Valid: true},
-		})
-		if err != nil {
-			return err
-		}
-
-		// 3. Update cached balances after entries are written.
-		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.Neg().StringFixed(4),
-			ID:      accountID,
-		})
-		if err != nil {
-			return err
-		}
-
-		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.StringFixed(4),
-			ID:      settlement.ID,
-		})
-		if err != nil {
-			return err
-		}
-
-		log.Info().
-			Str("tx_id", txID.String()).
-			Str("account_id", accountID.String()).
-			Str("amount", amount.StringFixed(4)).
-			Msg("Withdrawal completed")
-
-		return nil
+		return db.RecordAdminAuditTx(ctx, executor, actorID, nil, &accountID,
+			"ACCOUNT_BALANCE_"+operation, before.Balance, after.Balance, requestID)
 	})
 }
 
@@ -229,6 +279,12 @@ func (s *LedgerService) Transfer(ctx context.Context, fromID, toID uuid.UUID, am
 		toAcc, err := q.GetAccountForUpdate(ctx, toID)
 		if err != nil {
 			return err
+		}
+		if fromAcc.IsSystem || toAcc.IsSystem {
+			return ErrSystemAccount
+		}
+		if fromAcc.Status != "ACTIVE" || toAcc.Status != "ACTIVE" {
+			return ErrAccountBlocked
 		}
 
 		if fromAcc.Currency != toAcc.Currency {
@@ -291,12 +347,7 @@ func (s *LedgerService) Transfer(ctx context.Context, fromID, toID uuid.UUID, am
 			return err
 		}
 
-		log.Info().
-			Str("tx_id", txID.String()).
-			Str("from_id", fromID.String()).
-			Str("to_id", toID.String()).
-			Str("amount", amount.StringFixed(4)).
-			Msg("Transfer completed")
+		log.Info().Str("tx_id", txID.String()).Msg("Transfer completed")
 
 		return nil
 	})
@@ -328,19 +379,12 @@ func (s *LedgerService) ReconcileAccount(ctx context.Context, accountID uuid.UUI
 
 	if !stored.Equal(calculated) {
 		// Mismatch means denormalized cache drifted from ledger truth.
-		log.Error().
-			Str("account_id", accountID.String()).
-			Str("stored_balance", account.Balance).
-			Str("calculated", calculated.StringFixed(4)).
-			Msg("Balance mismatch detected")
+		log.Error().Msg("Balance mismatch detected")
 		return false, fmt.Errorf("balance mismatch: stored %s, calculated %s",
 			account.Balance, calculated.StringFixed(4))
 	}
 
-	log.Info().
-		Str("account_id", accountID.String()).
-		Str("balance", account.Balance).
-		Msg("Account reconciled successfully")
+	log.Info().Msg("Account reconciled successfully")
 
 	return true, nil
 }

@@ -491,6 +491,22 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
+	sessionVersion, err := tokenSessionVersion(r)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	expiresAt, err := tokenExpiry(r)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	updates, unsubscribe, err := h.payments.EventHub().Subscribe(ownerID)
+	if err != nil {
+		respondError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	defer unsubscribe()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		respondError(w, http.StatusInternalServerError, "streaming unsupported")
@@ -512,10 +528,10 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			afterID = parsedID
 		}
 	}
-	updates, unsubscribe := h.payments.EventHub().Subscribe(ownerID)
-	defer unsubscribe()
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
+	expiryTimer := time.NewTimer(time.Until(expiresAt))
+	defer expiryTimer.Stop()
 
 	writeEvents := func() error {
 		events, listErr := h.store.ListAuditEventsAfter(r.Context(), sqlc.ListAuditEventsAfterParams{
@@ -544,11 +560,17 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-expiryTimer.C:
+			return
 		case <-updates:
 			if writeEvents() != nil {
 				return
 			}
 		case <-ticker.C:
+			persistedVersion, versionErr := h.store.GetUserSessionVersion(r.Context(), ownerID)
+			if versionErr != nil || persistedVersion != sessionVersion {
+				return
+			}
 			if _, err = fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
 				return
 			}

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Toast } from "@/components/Toast";
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, maximumScale: 5 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+	await headers();
 	return <html lang="de" className="h-full antialiased" data-scroll-behavior="smooth"><body className="min-h-screen"><Providers>{children}<Toast /></Providers></body></html>;
 }

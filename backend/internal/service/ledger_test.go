@@ -122,3 +122,56 @@ func TestConcurrentDeposits(t *testing.T) {
 	balance := getAccountBalance(t, ledger, accountID)
 	assert.Equal(t, "200.0000", balance)
 }
+
+func TestLedgerRejectsBlockedAndSystemAccounts(t *testing.T) {
+	ledger := setupTestLedger(t)
+	settlement, err := ledger.store.GetSettlementAccount(context.Background())
+	require.NoError(t, err)
+	for _, status := range []string{"BLOCKED", "CLOSED"} {
+		account, createErr := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{}, Name: status + " " + uuid.NewString(), Currency: settlement.Currency,
+			IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: status,
+		})
+		require.NoError(t, createErr)
+		require.ErrorIs(t, ledger.Deposit(context.Background(), account.ID, "10.00"), ErrAccountBlocked)
+		require.ErrorIs(t, ledger.Withdraw(context.Background(), account.ID, "10.00"), ErrAccountBlocked)
+		assert.Equal(t, "0.0000", getAccountBalance(t, ledger, account.ID))
+	}
+	require.ErrorIs(t, ledger.Deposit(context.Background(), settlement.ID, "10.00"), ErrSystemAccount)
+}
+
+func TestTransferRejectsBlockedDestinationWithoutChangingBalances(t *testing.T) {
+	ledger := setupTestLedger(t)
+	fromID := createTestAccount(t, ledger, "100.00")
+	settlement, err := ledger.store.GetSettlementAccount(context.Background())
+	require.NoError(t, err)
+	blocked, err := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{}, Name: "Blocked target " + uuid.NewString(), Currency: settlement.Currency,
+		IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "BLOCKED",
+	})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, ledger.Transfer(context.Background(), fromID, blocked.ID, "25.00"), ErrAccountBlocked)
+	require.ErrorIs(t, ledger.Transfer(context.Background(), fromID, settlement.ID, "25.00"), ErrSystemAccount)
+	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, fromID))
+	assert.Equal(t, "0.0000", getAccountBalance(t, ledger, blocked.ID))
+}
+
+func TestAdminBalanceAdjustmentCreatesAuditAtomically(t *testing.T) {
+	ledger := setupTestLedger(t)
+	admin, err := ledger.store.CreateUser(t.Context(), sqlc.CreateUserParams{
+		Email: "audit-admin-" + uuid.NewString() + "@example.com", HashedPassword: "test-only", FullName: "Audit Admin",
+	})
+	require.NoError(t, err)
+	accountID := createTestAccount(t, ledger, "0.00")
+	beforeCount, err := ledger.store.CountAdminAuditEvents(t.Context())
+	require.NoError(t, err)
+
+	require.NoError(t, ledger.AdjustBalanceAsAdmin(
+		t.Context(), admin.ID, accountID, "DEPOSIT", "25.00", "test-request-id",
+	))
+	afterCount, err := ledger.store.CountAdminAuditEvents(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, beforeCount+1, afterCount)
+	assert.Equal(t, "25.0000", getAccountBalance(t, ledger, accountID))
+}

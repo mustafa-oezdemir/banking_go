@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -59,6 +58,12 @@ func authenticatedUserID(r *http.Request) (uuid.UUID, error) {
 		return uuid.Nil, errors.New("user_id claim is not a valid UUID")
 	}
 	return userID, nil
+}
+
+func parseQueryInt32(raw string) (int32, error) {
+	var value int32
+	err := json.Unmarshal([]byte(raw), &value)
+	return value, err
 }
 
 // NewHandler constructs a Handler with the required service and persistence dependencies.
@@ -122,20 +127,20 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		FullName:       defaultFullName(input.FullName, email),
 	})
 	if err != nil {
-		log.Error().Err(err).Str("email", email).Msg("Failed to create user")
+		log.Error().Err(err).Msg("Failed to create user")
 		respondError(w, http.StatusConflict, "user already exists or failed")
 		return
 	}
 
 	token, err := GenerateToken(user.ID)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", user.ID.String()).Msg("Failed to generate token")
+		log.Error().Err(err).Msg("Failed to generate token")
 		respondError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 	SetSessionCookie(w, r, token)
 
-	log.Info().Str("user_id", user.ID.String()).Str("email", user.Email).Msg("User registered successfully")
+	log.Info().Msg("User registered successfully")
 	respondJSON(w, http.StatusCreated, RegisterResponse{
 		UserID: user.ID.String(),
 		Email:  user.Email,
@@ -175,32 +180,38 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.GetUserByEmail(r.Context(), email)
 	if err != nil {
 		passwordMatches(dummyPasswordHash, input.Password)
-		log.Warn().Err(err).Str("email", email).Msg("Login failed - user not found")
+		log.Warn().Err(err).Msg("Login failed - user not found")
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	if !passwordMatches([]byte(user.HashedPassword), input.Password) {
-		log.Warn().Str("email", email).Msg("Login failed - invalid password")
+		log.Warn().Msg("Login failed - invalid password")
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	// Step 3: Return a fresh JWT on successful authentication.
-	token, err := GenerateToken(user.ID)
+	sessionVersion, err := h.store.GetUserSessionVersion(r.Context(), user.ID)
 	if err != nil {
-		log.Error().Err(err).Str("user_id", user.ID.String()).Msg("Failed to generate token")
+		respondError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+	token, err := GenerateTokenForVersion(user.ID, sessionVersion)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to generate token")
 		respondError(w, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 	SetSessionCookie(w, r, token)
 
-	log.Info().Str("user_id", user.ID.String()).Str("email", user.Email).Msg("User logged in successfully")
+	log.Info().Msg("User logged in successfully")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "Login successful"})
 }
 
-// Logout clears the HttpOnly browser session cookie.
+// Logout revokes the authenticated token generation and clears the browser cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	revokeAuthenticatedSession(h.store, r)
 	ClearSessionCookie(w, r)
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "Logout successful"})
 }
@@ -254,7 +265,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -291,12 +302,12 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID.String()).Str("name", name).Msg("Failed to create account")
+		log.Error().Err(err).Msg("Failed to create account")
 		respondError(w, http.StatusInternalServerError, "failed to create account")
 		return
 	}
 
-	log.Info().Str("account_id", acc.ID.String()).Str("user_id", userID.String()).Str("name", acc.Name).Msg("Account created")
+	log.Info().Msg("Account created")
 	respondJSON(w, http.StatusCreated, toAccountResponse(acc))
 }
 
@@ -326,7 +337,7 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -334,7 +345,7 @@ func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Fetch only accounts owned by the authenticated user.
 	accounts, err := h.store.ListAccountsByOwner(r.Context(), uuid.NullUUID{UUID: userID, Valid: true})
 	if err != nil {
-		log.Error().Err(err).Str("user_id", userID.String()).Msg("Failed to list accounts")
+		log.Error().Err(err).Msg("Failed to list accounts")
 		respondError(w, http.StatusInternalServerError, "failed to list accounts")
 		return
 	}
@@ -376,7 +387,7 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -391,13 +402,13 @@ func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Enforce account ownership before returning account details.
 	acc, err := h.store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("Account not found")
+		log.Warn().Err(err).Msg("Account not found")
 		respondError(w, http.StatusNotFound, "account not found")
 		return
 	}
 
 	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
-		log.Warn().Str("account_id", accountID.String()).Str("user_id", userID.String()).Str("owner_id", acc.OwnerID.UUID.String()).Msg("Access denied to account")
+		log.Warn().Msg("Access denied to account")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -454,7 +465,7 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to load account for update")
+		log.Error().Err(err).Msg("Failed to load account for update")
 		respondError(w, http.StatusInternalServerError, "failed to update account")
 		return
 	}
@@ -473,12 +484,12 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to update account")
+		log.Error().Err(err).Msg("Failed to update account")
 		respondError(w, http.StatusInternalServerError, "failed to update account")
 		return
 	}
 
-	log.Info().Str("account_id", accountID.String()).Str("user_id", userID.String()).Str("name", name).Msg("Account updated")
+	log.Info().Msg("Account updated")
 	respondJSON(w, http.StatusOK, toAccountResponse(updatedAccount))
 }
 
@@ -517,7 +528,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to load account for deletion")
+		log.Error().Err(err).Msg("Failed to load account for deletion")
 		respondError(w, http.StatusInternalServerError, "failed to delete account")
 		return
 	}
@@ -527,7 +538,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	balance, err := decimal.NewFromString(account.Balance)
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to parse account balance")
+		log.Error().Err(err).Msg("Failed to parse account balance")
 		respondError(w, http.StatusInternalServerError, "failed to delete account")
 		return
 	}
@@ -538,7 +549,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	hasEntries, err := h.store.AccountHasEntries(r.Context(), accountID)
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to check account history")
+		log.Error().Err(err).Msg("Failed to check account history")
 		respondError(w, http.StatusInternalServerError, "failed to delete account")
 		return
 	}
@@ -556,12 +567,12 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to delete account")
+		log.Error().Err(err).Msg("Failed to delete account")
 		respondError(w, http.StatusInternalServerError, "failed to delete account")
 		return
 	}
 
-	log.Info().Str("account_id", accountID.String()).Str("user_id", userID.String()).Msg("Account deleted")
+	log.Info().Msg("Account deleted")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "Account deleted successfully"})
 }
 
@@ -597,7 +608,7 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -611,12 +622,12 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Load account and enforce ownership authorization.
 	acc, err := h.store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("Deposit failed - account not found")
+		log.Warn().Err(err).Msg("Deposit failed - account not found")
 		respondError(w, http.StatusNotFound, "account not found")
 		return
 	}
 	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
-		log.Warn().Str("account_id", accountID.String()).Str("user_id", userID.String()).Msg("Deposit denied - access forbidden")
+		log.Warn().Msg("Deposit denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -631,7 +642,7 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 
 	err = h.ledger.Deposit(r.Context(), accountID, amount)
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Str("amount", amount).Msg("Deposit failed")
+		log.Error().Err(err).Msg("Deposit failed")
 		code := http.StatusInternalServerError
 		if errors.Is(err, service.ErrInvalidAmount) || errors.Is(err, service.ErrCurrencyMismatch) {
 			code = http.StatusBadRequest
@@ -640,7 +651,7 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info().Str("account_id", accountID.String()).Str("user_id", userID.String()).Str("amount", amount).Msg("Deposit successful")
+	log.Info().Msg("Deposit successful")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "deposit successful"})
 }
 
@@ -676,7 +687,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -690,12 +701,12 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Enforce ownership before attempting withdrawal.
 	acc, err := h.store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("Withdrawal failed - account not found")
+		log.Warn().Err(err).Msg("Withdrawal failed - account not found")
 		respondError(w, http.StatusNotFound, "account not found")
 		return
 	}
 	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
-		log.Warn().Str("account_id", accountID.String()).Str("user_id", userID.String()).Msg("Withdrawal denied - access forbidden")
+		log.Warn().Msg("Withdrawal denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -710,7 +721,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	err = h.ledger.Withdraw(r.Context(), accountID, amount)
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Str("amount", amount).Msg("Withdrawal failed")
+		log.Error().Err(err).Msg("Withdrawal failed")
 		code := http.StatusInternalServerError
 		if errors.Is(err, service.ErrInsufficientFunds) || errors.Is(err, service.ErrInvalidAmount) || errors.Is(err, service.ErrCurrencyMismatch) {
 			code = http.StatusBadRequest
@@ -719,7 +730,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Info().Str("account_id", accountID.String()).Str("user_id", userID.String()).Str("amount", amount).Msg("Withdrawal successful")
+	log.Info().Msg("Withdrawal successful")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "withdrawal successful"})
 }
 
@@ -753,7 +764,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -784,7 +795,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		toIDRaw = strings.TrimSpace(input.ToAccountID)
 	}
 
-	log.Info().Str("from_id", fromIDRaw).Str("to_id", toIDRaw).Interface("amount", input.Amount).Msg("Transfer request received")
+	log.Info().Msg("Transfer request received")
 
 	if fromIDRaw == "" {
 		log.Warn().Msg("Transfer missing from_id")
@@ -800,14 +811,14 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Validate IDs and amount format before business execution.
 	fromID, err := uuid.Parse(fromIDRaw)
 	if err != nil {
-		log.Warn().Err(err).Str("from_id", fromIDRaw).Msg("Invalid from_id UUID format")
+		log.Warn().Err(err).Msg("Invalid from_id UUID format")
 		respondError(w, http.StatusBadRequest, "invalid from_id format")
 		return
 	}
 
 	toID, err := uuid.Parse(toIDRaw)
 	if err != nil {
-		log.Warn().Err(err).Str("to_id", toIDRaw).Msg("Invalid to_id UUID format")
+		log.Warn().Err(err).Msg("Invalid to_id UUID format")
 		respondError(w, http.StatusBadRequest, "invalid to_id format")
 		return
 	}
@@ -827,12 +838,12 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Authorize ownership on source account only.
 	fromAcc, err := h.store.GetAccount(r.Context(), fromID)
 	if err != nil {
-		log.Warn().Err(err).Str("from_id", fromID.String()).Msg("Transfer failed - from account not found")
+		log.Warn().Err(err).Msg("Transfer failed - from account not found")
 		respondError(w, http.StatusNotFound, "from account not found")
 		return
 	}
 	if fromAcc.IsSystem || !fromAcc.OwnerID.Valid || fromAcc.OwnerID.UUID != userID {
-		log.Warn().Str("from_id", fromID.String()).Str("user_id", userID.String()).Msg("Transfer denied - access forbidden")
+		log.Warn().Msg("Transfer denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -840,12 +851,12 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	// Step 5: Run transfer through service layer (atomic double-entry write).
 	err = h.ledger.Transfer(r.Context(), fromID, toID, amount)
 	if err != nil {
-		log.Error().Err(err).Str("from_id", fromID.String()).Str("to_id", toID.String()).Str("amount", amount).Msg("Transfer failed")
+		log.Error().Err(err).Msg("Transfer failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	log.Info().Str("from_id", fromID.String()).Str("to_id", toID.String()).Str("user_id", userID.String()).Str("amount", amount).Msg("Transfer successful")
+	log.Info().Msg("Transfer successful")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "transfer successful"})
 }
 
@@ -881,7 +892,7 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -895,12 +906,12 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Enforce account ownership.
 	acc, err := h.store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("Get entries failed - account not found")
+		log.Warn().Err(err).Msg("Get entries failed - account not found")
 		respondError(w, http.StatusNotFound, "account not found")
 		return
 	}
 	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
-		log.Warn().Str("account_id", accountID.String()).Str("user_id", userID.String()).Msg("Get entries denied - access forbidden")
+		log.Warn().Msg("Get entries denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -909,30 +920,24 @@ func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
-	limit := 20
-	offset := 0
+	limit := int32(20)
+	offset := int32(0)
 
-	if v, parseErr := strconv.Atoi(limitStr); parseErr == nil && v > 0 {
+	if v, parseErr := parseQueryInt32(limitStr); parseErr == nil && v > 0 {
 		limit = min(v, 100)
 	}
-	if v, parseErr := strconv.Atoi(offsetStr); parseErr == nil && v >= 0 {
+	if v, parseErr := parseQueryInt32(offsetStr); parseErr == nil && v >= 0 {
 		offset = v
-	}
-
-	// Validate conversions to int32 to prevent overflow
-	if limit > 2147483647 || offset > 2147483647 {
-		respondError(w, http.StatusBadRequest, "limit or offset too large")
-		return
 	}
 
 	// Step 4: Fetch immutable ledger entries for the account.
 	entries, err := h.store.ListEntriesByAccount(r.Context(), sqlc.ListEntriesByAccountParams{
 		AccountID: accountID,
-		Limit:     int32(limit),
-		Offset:    int32(offset),
+		Limit:     limit,
+		Offset:    offset,
 	})
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Failed to fetch entries")
+		log.Error().Err(err).Msg("Failed to fetch entries")
 		respondError(w, http.StatusInternalServerError, "failed to fetch entries")
 		return
 	}
@@ -976,7 +981,7 @@ func (h *Handler) GetTransactions(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -991,13 +996,13 @@ func (h *Handler) GetTransactions(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Load all entries belonging to the transaction.
 	entries, err := h.store.ListEntriesByTransaction(r.Context(), transactionID)
 	if err != nil {
-		log.Error().Err(err).Str("transaction_id", transactionID.String()).Msg("Failed to fetch transaction")
+		log.Error().Err(err).Msg("Failed to fetch transaction")
 		respondError(w, http.StatusInternalServerError, "failed to fetch transaction")
 		return
 	}
 
 	if len(entries) == 0 {
-		log.Warn().Str("transaction_id", transactionID.String()).Msg("Transaction not found")
+		log.Warn().Msg("Transaction not found")
 		respondError(w, http.StatusNotFound, "transaction not found")
 		return
 	}
@@ -1007,7 +1012,7 @@ func (h *Handler) GetTransactions(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range entries {
 		acc, err := h.store.GetAccount(r.Context(), entry.AccountID)
 		if err != nil {
-			log.Error().Err(err).Str("account_id", entry.AccountID.String()).Msg("Failed to authorize transaction")
+			log.Error().Err(err).Msg("Failed to authorize transaction")
 			respondError(w, http.StatusInternalServerError, "failed to authorize transaction")
 			return
 		}
@@ -1019,7 +1024,7 @@ func (h *Handler) GetTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !authorized {
-		log.Warn().Str("transaction_id", transactionID.String()).Str("user_id", userID.String()).Msg("Get transaction denied - access forbidden")
+		log.Warn().Msg("Get transaction denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -1062,7 +1067,7 @@ func (h *Handler) ReconcileAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		log.Error().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user_id UUID in token")
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
@@ -1076,12 +1081,12 @@ func (h *Handler) ReconcileAccount(w http.ResponseWriter, r *http.Request) {
 	// Step 2: Enforce ownership before reconciliation.
 	acc, err := h.store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		log.Warn().Err(err).Str("account_id", accountID.String()).Msg("Reconcile failed - account not found")
+		log.Warn().Err(err).Msg("Reconcile failed - account not found")
 		respondError(w, http.StatusNotFound, "account not found")
 		return
 	}
 	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
-		log.Warn().Str("account_id", accountID.String()).Str("user_id", userID.String()).Msg("Reconcile denied - access forbidden")
+		log.Warn().Msg("Reconcile denied - access forbidden")
 		respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
@@ -1089,12 +1094,12 @@ func (h *Handler) ReconcileAccount(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Compare stored balance with computed ledger balance.
 	matched, err := h.ledger.ReconcileAccount(r.Context(), accountID)
 	if err != nil {
-		log.Error().Err(err).Str("account_id", accountID.String()).Msg("Reconciliation failed")
+		log.Error().Err(err).Msg("Reconciliation failed")
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	log.Info().Str("account_id", accountID.String()).Bool("matched", matched).Msg("Reconciliation completed")
+	log.Info().Bool("matched", matched).Msg("Reconciliation completed")
 	respondJSON(w, http.StatusOK, ReconcileResponse{
 		Matched: matched,
 		Message: "Account reconciled successfully",

@@ -117,6 +117,14 @@ func TestValidateAccountName(t *testing.T) {
 	}
 }
 
+func TestParseQueryInt32RejectsOverflow(t *testing.T) {
+	value, err := parseQueryInt32("2147483647")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2147483647), value)
+	_, err = parseQueryInt32("2147483648")
+	require.Error(t, err)
+}
+
 func setupAccountRouter(t *testing.T, h *Handler) http.Handler {
 	t.Helper()
 
