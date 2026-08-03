@@ -1015,7 +1015,7 @@
         },
         "/register": {
             "post": {
-                "description": "Creates a new user with email and hashed password, returns user details and JWT token",
+                "description": "Creates a user, a default EUR account, and a fictional 500 EUR opening balance; returns user details and a JWT token",
                 "consumes": [
                     "application/json"
                 ],

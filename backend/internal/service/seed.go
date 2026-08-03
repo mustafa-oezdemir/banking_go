@@ -123,11 +123,21 @@ func SeedConfiguredAdmin(ctx context.Context, store *db.Store, ledger *LedgerSer
 		return errors.New("ADMIN_SEED_PASSWORD must contain between 15 and 72 bytes")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hash admin seed password: %w", err)
+	passwordHash := ""
+	existing, lookupErr := store.GetUserByEmail(ctx, email)
+	if lookupErr == nil && bcrypt.CompareHashAndPassword([]byte(existing.HashedPassword), []byte(password)) == nil {
+		passwordHash = existing.HashedPassword
+	} else if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return fmt.Errorf("load configured admin: %w", lookupErr)
 	}
-	adminID, err := store.UpsertAdminUser(ctx, email, string(hash), "Pehlione Administrator")
+	if passwordHash == "" {
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return fmt.Errorf("hash admin seed password: %w", hashErr)
+		}
+		passwordHash = string(hash)
+	}
+	adminID, err := store.UpsertAdminUser(ctx, email, passwordHash, "Pehlione Administrator")
 	if err != nil {
 		return fmt.Errorf("seed admin user: %w", err)
 	}

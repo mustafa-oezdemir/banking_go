@@ -79,7 +79,7 @@ func NewHandlerWithPayments(ledger *service.LedgerService, payments *service.Pay
 
 // Register godoc
 // @Summary      Register a new user
-// @Description  Creates a new user with email and hashed password, returns user details and JWT token
+// @Description  Creates a user, a default EUR account, and a fictional 500 EUR opening balance; returns user details and a JWT token
 // @Tags         auth
 // @Accept       json
 // @Produce      json
@@ -120,8 +120,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Persist user record and then mint JWT for immediate login.
-	user, err := h.store.CreateUser(r.Context(), sqlc.CreateUserParams{
+	// Step 3: Atomically persist the user, their EUR account, and the balanced signup credit.
+	user, err := h.ledger.CreateFundedCustomer(r.Context(), sqlc.CreateUserParams{
 		Email:          email,
 		HashedPassword: string(hashed),
 		FullName:       defaultFullName(input.FullName, email),

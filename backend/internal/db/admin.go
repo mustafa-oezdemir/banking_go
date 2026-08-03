@@ -47,7 +47,10 @@ func (store *Store) UpsertAdminUser(ctx context.Context, email, hashedPassword, 
 			hashed_password = EXCLUDED.hashed_password,
 			full_name = EXCLUDED.full_name,
 			role = 'ADMIN',
-			session_version = users.session_version + 1
+			session_version = users.session_version + CASE
+				WHEN users.hashed_password <> EXCLUDED.hashed_password OR users.role <> 'ADMIN' THEN 1
+				ELSE 0
+			END
 		RETURNING id`, email, hashedPassword, fullName).Scan(&id)
 	return id, err
 }

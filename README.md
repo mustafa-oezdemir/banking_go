@@ -9,6 +9,7 @@ A simulation-only banking application built with Go, PostgreSQL and Next.js. It 
 ## What is included
 
 - German-language responsive banking UI: Übersicht, Konten, Umsätze, Überweisen, Terminüberweisungen, Daueraufträge, Empfänger, Profil und Sicherheit.
+- Every new registration atomically receives a default EUR Girokonto with a fictional €500 opening balance.
 - Six-step payment wizard with explicit demo consent.
 - German-format demo IBAN generation with MOD-97 validation and a database uniqueness constraint.
 - Umbuchung, internal demo transfer, simulated SEPA, simulated SEPA Instant, scheduled payments and standing orders.

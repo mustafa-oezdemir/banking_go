@@ -12,8 +12,11 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
+
+const signupOpeningBalance = "500.00"
 
 var (
 	// ErrInsufficientFunds is returned when an account balance cannot cover a debit.
@@ -38,6 +41,37 @@ type LedgerService struct {
 // NewLedgerService constructs a LedgerService backed by the provided store.
 func NewLedgerService(store *db.Store) *LedgerService {
 	return &LedgerService{store: store}
+}
+
+// CreateFundedCustomer atomically creates a customer, their default EUR account,
+// and the balanced signup credit. A failed account or ledger write rolls back the user too.
+func (s *LedgerService) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (sqlc.CreateUserRow, error) {
+	iban, err := sepa.GenerateGermanDemoIBAN()
+	if err != nil {
+		return sqlc.CreateUserRow{}, fmt.Errorf("generate signup account IBAN: %w", err)
+	}
+	openingBalance := decimal.RequireFromString(signupOpeningBalance)
+	var user sqlc.CreateUserRow
+	err = s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
+		var txErr error
+		user, txErr = q.CreateUser(ctx, input)
+		if txErr != nil {
+			return txErr
+		}
+		account, txErr := q.CreateAccount(ctx, sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: user.ID, Valid: true},
+			Name:    "Girokonto", Currency: "EUR", IsSystem: false,
+			Iban: iban, AccountType: "GIROKONTO", Status: "ACTIVE",
+		})
+		if txErr != nil {
+			return txErr
+		}
+		return s.depositTx(ctx, q, account.ID, openingBalance)
+	})
+	if err != nil {
+		return sqlc.CreateUserRow{}, err
+	}
+	return user, nil
 }
 
 // Deposit external money into user account
