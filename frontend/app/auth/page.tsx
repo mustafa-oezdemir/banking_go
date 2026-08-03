@@ -105,7 +105,7 @@ export default function AuthPage() {
 						{message && <div role="alert" className={`rounded-lg border p-3 text-sm ${success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{message}</div>}
 						<button disabled={loading} className="bank-primary w-full">{loading ? "Bitte warten…" : mode === "login" ? "Sicher anmelden" : mode === "register" ? "Demo-Zugang erstellen" : "Reset-Link senden"}</button>
 					</form>
-					{mode === "login" && <button type="button" onClick={() => changeMode("forgot")} className="mt-4 w-full text-center text-sm font-semibold text-[#005b96] hover:underline">Passwort vergessen?</button>}
+					{mode === "login" && <button type="button" onClick={() => changeMode("forgot")} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-[#b8cde0] bg-[#f7fbff] px-4 py-3 text-sm font-bold text-[#005b96] transition hover:border-[#005b96] hover:bg-[#edf6fc] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#005b96]" aria-label="Passwort vergessen und Reset-Link anfordern"><span aria-hidden="true">↻</span>Passwort vergessen?</button>}
 					{mode === "forgot" && <button type="button" onClick={() => changeMode("login")} className="mt-4 w-full text-center text-sm font-semibold text-[#005b96] hover:underline">Zurück zur Anmeldung</button>}
 					<div className="mt-6 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Dies ist kein echtes Bankkonto. Verwenden Sie kein Passwort, das Sie bei anderen Diensten nutzen.</div>
 				</div>
