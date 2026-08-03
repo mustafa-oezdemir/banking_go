@@ -7,6 +7,7 @@ import {
 	cancelPayment,
 	deleteStandingOrder,
 	getAccountTransactions,
+	getAccount,
 	getAccounts,
 	getBeneficiaries,
 	getPayments,
@@ -209,7 +210,83 @@ function AccountTile({ account }: { account: Account }) {
 }
 
 function Accounts({ accounts }: { accounts: Account[] }) {
-	return <div className="grid gap-5 lg:grid-cols-2">{accounts.map((account) => <Card key={account.id} className="overflow-hidden"><div className="bg-gradient-to-r from-[#003b70] to-[#0066a1] p-5 text-white"><div className="flex justify-between"><div><p className="text-sm text-blue-100">{account.account_type === "SPARKONTO" ? "Sparkonto" : "Girokonto"}</p><h2 className="mt-1 text-lg font-bold">{account.name}</h2></div><span className="rounded-full bg-white/15 px-3 py-1 text-xs">Demo</span></div><p className="mt-8 font-mono text-sm tracking-wide">{account.masked_iban}</p></div><div className="grid grid-cols-2 gap-4 p-5"><div><p className="text-xs text-slate-500">Kontostand</p><p className="mt-1 font-bold">{formatCurrency(account.balance)}</p></div><div><p className="text-xs text-slate-500">Verfügbar</p><p className="mt-1 font-bold">{formatCurrency(account.available_balance)}</p></div></div></Card>)}</div>;
+	return <div className="grid gap-5 lg:grid-cols-2">{accounts.map((account) => <AccountDetailsCard key={account.id} account={account} />)}</div>;
+}
+
+function AccountDetailsCard({ account }: { account: Account }) {
+	const [iban, setIBAN] = useState("");
+	const [loadingIBAN, setLoadingIBAN] = useState(false);
+	const [feedback, setFeedback] = useState("");
+
+	const revealIBAN = async () => {
+		if (iban) {
+			setIBAN("");
+			setFeedback("");
+			return;
+		}
+		setLoadingIBAN(true);
+		setFeedback("");
+		try {
+			const result = await getAccount(account.id);
+			if (!result.response.ok || !result.data.iban) throw new Error("IBAN konnte nicht geladen werden.");
+			setIBAN(result.data.iban);
+		} catch (loadError) {
+			setFeedback(loadError instanceof Error ? loadError.message : "IBAN konnte nicht geladen werden.");
+		} finally {
+			setLoadingIBAN(false);
+		}
+	};
+
+	const copyIBAN = async () => {
+		if (!iban) return;
+		try {
+			await navigator.clipboard.writeText(normalizeIBANForSharing(iban));
+			setFeedback("IBAN wurde kopiert.");
+		} catch {
+			setFeedback("IBAN konnte nicht kopiert werden.");
+		}
+	};
+
+	const shareIBAN = async () => {
+		if (!iban) return;
+		const text = `${account.name}\nIBAN: ${formatIBANForDisplay(iban)}`;
+		if (navigator.share) {
+			try {
+				await navigator.share({ title: `${account.name} · IBAN`, text });
+				setFeedback("IBAN wurde zum Teilen geöffnet.");
+			} catch (shareError) {
+				if (shareError instanceof DOMException && shareError.name === "AbortError") return;
+				setFeedback("IBAN konnte nicht geteilt werden.");
+			}
+			return;
+		}
+		await copyIBAN();
+		setFeedback("Teilen wird auf diesem Gerät nicht unterstützt. Die IBAN wurde kopiert.");
+	};
+
+	return <Card className="overflow-hidden">
+		<div className="bg-gradient-to-r from-[#003b70] to-[#0066a1] p-5 text-white">
+			<div className="flex justify-between"><div><p className="text-sm text-blue-100">{account.account_type === "SPARKONTO" ? "Sparkonto" : "Girokonto"}</p><h2 className="mt-1 text-lg font-bold">{account.name}</h2></div><span className="rounded-full bg-white/15 px-3 py-1 text-xs">Demo</span></div>
+			<p className="mt-8 break-all font-mono text-sm tracking-wide">{iban ? formatIBANForDisplay(iban) : account.masked_iban}</p>
+		</div>
+		<div className="p-5">
+			<div className="grid grid-cols-2 gap-4"><div><p className="text-xs text-slate-500">Kontostand</p><p className="mt-1 font-bold">{formatCurrency(account.balance)}</p></div><div><p className="text-xs text-slate-500">Verfügbar</p><p className="mt-1 font-bold">{formatCurrency(account.available_balance)}</p></div></div>
+			<div className="mt-5 grid gap-2 sm:grid-cols-3">
+				<button type="button" aria-pressed={Boolean(iban)} disabled={loadingIBAN} onClick={() => void revealIBAN()} className="rounded-lg border border-[#0066a1] px-3 py-2.5 text-sm font-semibold text-[#0066a1] transition hover:bg-[#e8f1f8] disabled:cursor-wait disabled:opacity-50">{loadingIBAN ? "Wird geladen…" : iban ? "IBAN verbergen" : "IBAN anzeigen"}</button>
+				<button type="button" disabled={!iban} onClick={() => void copyIBAN()} className="rounded-lg bg-[#0066a1] px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-[#005588] disabled:cursor-not-allowed disabled:opacity-40">Kopieren</button>
+				<button type="button" disabled={!iban} onClick={() => void shareIBAN()} className="rounded-lg bg-slate-700 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">Teilen</button>
+			</div>
+			{feedback && <p role="status" className="mt-3 text-sm text-slate-600">{feedback}</p>}
+		</div>
+	</Card>;
+}
+
+function normalizeIBANForSharing(value: string): string {
+	return value.replace(/\s+/g, "").toUpperCase();
+}
+
+function formatIBANForDisplay(value: string): string {
+	return normalizeIBANForSharing(value).replace(/(.{4})/g, "$1 ").trim();
 }
 
 function Transactions({ entries }: { entries: Entry[] }) {
