@@ -31,6 +31,12 @@ services:
         value: true
       - key: RUN_DB_MIGRATIONS_ON_START
         value: true
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        value: Pehlione DemoBank <banking@pehlione.com>
+      - key: FRONTEND_URL
+        value: https://pehlione-banking-frontend.onrender.com
     healthCheckPath: /health
 
   # Next.js frontend

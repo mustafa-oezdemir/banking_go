@@ -38,6 +38,14 @@ const nextConfig: NextConfig = {
           destination: `${apiBaseUrl}/login`,
         },
         {
+          source: "/forgot-password",
+          destination: `${apiBaseUrl}/forgot-password`,
+        },
+        {
+          source: "/reset-password",
+          destination: `${apiBaseUrl}/reset-password`,
+        },
+        {
           source: "/logout",
           destination: `${apiBaseUrl}/logout`,
         },

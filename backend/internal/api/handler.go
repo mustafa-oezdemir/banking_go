@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/internal/service"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
@@ -27,6 +28,7 @@ type Handler struct {
 	ledger   *service.LedgerService
 	payments *service.PaymentService
 	store    *db.Store
+	notifier notification.Sender
 }
 
 const maxAccountNameLength = 100
@@ -68,13 +70,23 @@ func parseQueryInt32(raw string) (int32, error) {
 
 // NewHandler constructs a Handler with the required service and persistence dependencies.
 func NewHandler(ledger *service.LedgerService, store *db.Store) *Handler {
-	return &Handler{ledger: ledger, payments: service.NewPaymentService(store, nil), store: store}
+	return &Handler{
+		ledger: ledger, payments: service.NewPaymentService(store, nil), store: store,
+		notifier: notification.NoopSender{},
+	}
 }
 
 // NewHandlerWithPayments allows main and the standalone worker to share the
 // same payment service and in-memory SSE hub.
 func NewHandlerWithPayments(ledger *service.LedgerService, payments *service.PaymentService, store *db.Store) *Handler {
-	return &Handler{ledger: ledger, payments: payments, store: store}
+	return &Handler{ledger: ledger, payments: payments, store: store, notifier: notification.NoopSender{}}
+}
+
+// SetNotificationSender enables transactional security and account emails.
+func (h *Handler) SetNotificationSender(sender notification.Sender) {
+	if sender != nil {
+		h.notifier = sender
+	}
 }
 
 // Register godoc
@@ -139,6 +151,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	SetSessionCookie(w, r, token)
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: customer.User.ID, AccountID: customer.Account.ID, Kind: "REGISTRATION_CREDIT",
+		Direction: "CREDIT", Amount: signupOpeningBalance, Currency: "EUR", Reference: "Startguthaben",
+	})
 
 	log.Info().Msg("User registered successfully")
 	respondJSON(w, http.StatusCreated, RegisterResponse{
@@ -652,6 +668,10 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, err.Error())
 		return
 	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: accountID, Kind: "DEPOSIT",
+		Direction: "CREDIT", Amount: amount, Currency: acc.Currency,
+	})
 
 	log.Info().Msg("Deposit successful")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "deposit successful"})
@@ -731,6 +751,10 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, err.Error())
 		return
 	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: accountID, Kind: "WITHDRAWAL",
+		Direction: "DEBIT", Amount: amount, Currency: acc.Currency,
+	})
 
 	log.Info().Msg("Withdrawal successful")
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "withdrawal successful"})
@@ -856,6 +880,17 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		log.Error().Err(err).Msg("Transfer failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: fromID, Kind: "TRANSFER_SENT",
+		Direction: "DEBIT", Amount: amount, Currency: fromAcc.Currency,
+	})
+	toAcc, lookupErr := h.store.GetAccount(r.Context(), toID)
+	if lookupErr == nil && !toAcc.IsSystem && toAcc.OwnerID.Valid {
+		h.notifier.NotifyActivity(notification.Activity{
+			UserID: toAcc.OwnerID.UUID, AccountID: toID, Kind: "TRANSFER_RECEIVED",
+			Direction: "CREDIT", Amount: amount, Currency: toAcc.Currency,
+		})
 	}
 
 	log.Info().Msg("Transfer successful")

@@ -109,6 +109,27 @@ export async function login(
   });
 }
 
+/** Request a 15-minute password reset link without exposing account existence. */
+export async function forgotPassword(
+  email: string,
+): Promise<ApiResponse<MessageResponse>> {
+  return request<MessageResponse>(API_ENDPOINTS.FORGOT_PASSWORD, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Consume a password reset token and revoke earlier sessions. */
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+): Promise<ApiResponse<MessageResponse>> {
+  return request<MessageResponse>(API_ENDPOINTS.RESET_PASSWORD, {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+}
+
 /**
  * Get all user accounts
  */

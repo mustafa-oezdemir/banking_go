@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
@@ -63,9 +64,10 @@ var (
 
 // PaymentService owns payment state transitions and double-entry booking.
 type PaymentService struct {
-	store *db.Store
-	hub   *EventHub
-	now   func() time.Time
+	store    *db.Store
+	hub      *EventHub
+	now      func() time.Time
+	notifier notification.Sender
 }
 
 // NewPaymentService creates a payment orchestration service for a store.
@@ -73,7 +75,14 @@ func NewPaymentService(store *db.Store, hub *EventHub) *PaymentService {
 	if hub == nil {
 		hub = NewEventHub()
 	}
-	return &PaymentService{store: store, hub: hub, now: time.Now}
+	return &PaymentService{store: store, hub: hub, now: time.Now, notifier: notification.NoopSender{}}
+}
+
+// SetNotificationSender enables post-commit account activity emails.
+func (s *PaymentService) SetNotificationSender(sender notification.Sender) {
+	if sender != nil {
+		s.notifier = sender
+	}
 }
 
 // EventHub returns the service's lightweight SSE notification hub.
@@ -283,6 +292,9 @@ func (s *PaymentService) ConfirmPayment(ctx context.Context, ownerID, paymentID 
 		return sqlc.PaymentOrder{}, err
 	}
 	s.hub.Publish(ownerID)
+	if businessErr == nil && result.Status == PaymentBooked {
+		s.notifyBookedPayment(ctx, result)
+	}
 	return result, businessErr
 }
 
@@ -409,6 +421,26 @@ func (s *PaymentService) bookPaymentTx(ctx context.Context, q *sqlc.Queries, ord
 	}
 	return q.MarkPaymentBooked(ctx, sqlc.MarkPaymentBookedParams{
 		LedgerTransactionID: uuid.NullUUID{UUID: txID, Valid: true}, PaymentOrderID: order.ID,
+	})
+}
+
+func (s *PaymentService) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrder) {
+	s.notifier.NotifyActivity(notification.Activity{
+		UserID: order.OwnerID, AccountID: order.SourceAccountID, Kind: "SEPA_PAYMENT_SENT",
+		Direction: "DEBIT", Amount: order.Amount, Currency: "EUR",
+		Counterparty: order.BeneficiaryName, Reference: order.Purpose.String,
+	})
+	if !order.BeneficiaryAccountID.Valid {
+		return
+	}
+	destination, err := s.store.GetAccount(ctx, order.BeneficiaryAccountID.UUID)
+	if err != nil || destination.IsSystem || !destination.OwnerID.Valid {
+		return
+	}
+	s.notifier.NotifyActivity(notification.Activity{
+		UserID: destination.OwnerID.UUID, AccountID: destination.ID, Kind: "SEPA_PAYMENT_RECEIVED",
+		Direction: "CREDIT", Amount: order.Amount, Currency: "EUR",
+		Reference: order.Purpose.String,
 	})
 }
 

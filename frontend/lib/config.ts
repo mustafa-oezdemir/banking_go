@@ -42,6 +42,8 @@ export const API_BASE_URL = getAPIBaseURL();
 export const API_ENDPOINTS = {
   REGISTER: "/register",
   LOGIN: "/login",
+  FORGOT_PASSWORD: "/forgot-password",
+  RESET_PASSWORD: "/reset-password",
   LOGOUT: "/logout",
   SESSION: "/session",
   ACCOUNTS: "/accounts",

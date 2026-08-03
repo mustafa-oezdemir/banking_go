@@ -48,6 +48,7 @@ func (s *PaymentService) RunDuePayments(ctx context.Context, batchSize int32) (i
 func (s *PaymentService) processClaimedPayment(ctx context.Context, paymentID uuid.UUID) error {
 	var ownerID uuid.UUID
 	var businessErr error
+	var bookedOrder sqlc.PaymentOrder
 	err := s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		order, err := q.GetPaymentOrderForUpdate(ctx, paymentID)
 		if err != nil {
@@ -65,6 +66,7 @@ func (s *PaymentService) processClaimedPayment(ctx context.Context, paymentID uu
 			businessErr = err
 			return s.auditWithQueries(ctx, q, order.OwnerID, order.ID, "PAYMENT_FAILED", map[string]any{"reason": publicFailureReason(err)})
 		}
+		bookedOrder = booked
 		return s.auditWithQueries(ctx, q, order.OwnerID, order.ID, "PAYMENT_BOOKED", map[string]any{"ledger_transaction_id": booked.LedgerTransactionID.UUID})
 	})
 	if ownerID != uuid.Nil {
@@ -72,6 +74,9 @@ func (s *PaymentService) processClaimedPayment(ctx context.Context, paymentID uu
 	}
 	if err != nil {
 		return err
+	}
+	if businessErr == nil && bookedOrder.ID != uuid.Nil {
+		s.notifyBookedPayment(ctx, bookedOrder)
 	}
 	return businessErr
 }

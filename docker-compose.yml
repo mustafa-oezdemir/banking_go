@@ -38,6 +38,9 @@ services:
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
       ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-Pehlione DemoBank <banking@pehlione.com>}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       db:
         condition: service_healthy

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 )
 
@@ -211,6 +212,18 @@ func (h *Handler) AdminAdjustAccountBalance(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	account, lookupErr := h.store.GetAccount(r.Context(), accountID)
+	if lookupErr == nil && account.OwnerID.Valid {
+		direction := "DEBIT"
+		if operation == "DEPOSIT" {
+			direction = "CREDIT"
+		}
+		h.notifier.NotifyActivity(notification.Activity{
+			UserID: account.OwnerID.UUID, AccountID: account.ID, Kind: "ADMIN_" + operation,
+			Direction: direction, Amount: amount.StringFixed(2), Currency: account.Currency,
+			Reference: "Administrative Kontobuchung",
+		})
 	}
 	respondJSON(w, http.StatusOK, MessageResponse{Message: "Account balance adjusted"})
 }

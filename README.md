@@ -156,7 +156,7 @@ yarn build
 
 | Purpose | Endpoints |
 | --- | --- |
-| Authentication | `POST /register`, `POST /login`, `POST /logout`, `GET /session` |
+| Authentication | `POST /register`, `POST /login`, `POST /forgot-password`, `POST /reset-password`, `POST /logout`, `GET /session` |
 | Accounts | `GET /accounts`, `GET /accounts/{id}`, `GET /accounts/{id}/transactions` |
 | Payee verification | `POST /payees/verify` |
 | Payments | `POST /payments`, `GET /payments`, `POST /payments/{id}/confirm`, `POST /payments/{id}/cancel` |
@@ -165,6 +165,18 @@ yarn build
 | Administration | `/admin/*` role-protected endpoints |
 
 `POST /payments` requires an `Idempotency-Key`. Reusing a key with the same normalized intent returns the existing order; reusing it with changed payment data returns a conflict. Payment creation alone never books funds—the client must complete VoP, display the summary and explicitly confirm the payment.
+
+### Transactional email
+
+Password-reset and account-activity messages are delivered through the Resend HTTPS API. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed. Deposit, withdrawal, internal transfer, SEPA booking and administrator balance adjustments enqueue an email to the address registered by the affected user.
+
+```env
+RESEND_API_KEY=re_...
+MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
+FRONTEND_URL=https://pehlione-banking-frontend.onrender.com
+```
+
+The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit the API key. Email delivery is intentionally decoupled from ledger commits: a provider outage is logged but never rolls back or duplicates a financial transaction.
 
 ## Render deployment
 
@@ -177,8 +189,9 @@ The repository includes a [`render.yaml`](render.yaml) Blueprint that deploys th
 1. In Render, select **New → Blueprint** and connect this repository.
 2. Select `render.yaml` from `main`.
 3. Configure `ADMIN_SEED_PASSWORD` if administrator bootstrap is required.
-4. Keep `DEMO_SEED=false` for a clean public environment, or configure a separate `DEMO_SEED_PASSWORD`.
-5. Deploy and verify `/health` before opening the frontend.
+4. Add `RESEND_API_KEY`, verify `pehlione.com` in Resend and confirm `MAIL_FROM`.
+5. Keep `DEMO_SEED=false` for a clean public environment, or configure a separate `DEMO_SEED_PASSWORD`.
+6. Deploy and verify `/health` before opening the frontend.
 
 > [!NOTE]
 > The free profile runs scheduled work inside the web process. Free services can sleep, so execution time is not guaranteed. For reliable scheduling, merge [`render.worker.example.yaml`](render.worker.example.yaml), disable the in-process scheduler and use a paid background worker connected to the same database.

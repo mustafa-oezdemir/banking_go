@@ -25,6 +25,7 @@ import (
 	_ "github.com/mustafa-oezdemir/banking_go/docs"
 	"github.com/mustafa-oezdemir/banking_go/internal/api"
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
+	emailservice "github.com/mustafa-oezdemir/banking_go/internal/email"
 	"github.com/mustafa-oezdemir/banking_go/internal/service"
 )
 
@@ -252,9 +253,17 @@ func main() {
 		seedCancel()
 		zlog.Info().Msg("Fictional demo seed is ready")
 	}
+	emailSvc := emailservice.NewFromEnvironment(store)
+	paymentSvc.SetNotificationSender(emailSvc)
+	if emailSvc.Enabled() {
+		zlog.Info().Msg("Resend transactional email delivery enabled")
+	} else {
+		zlog.Warn().Msg("Transactional email disabled: configure RESEND_API_KEY and MAIL_FROM")
+	}
 
 	// Wire HTTP handlers with service and persistence dependencies.
 	h := api.NewHandlerWithPayments(ledgerSvc, paymentSvc, store)
+	h.SetNotificationSender(emailSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -290,6 +299,10 @@ func main() {
 	authRateLimit := api.NewIPRateLimiter(10, time.Minute)
 	r.With(authRateLimit).Post("/register", h.Register)
 	r.With(authRateLimit).Post("/login", h.Login)
+	passwordResetRequestLimit := api.NewIPRateLimiter(5, time.Hour)
+	passwordResetConfirmLimit := api.NewIPRateLimiter(10, time.Hour)
+	r.With(passwordResetRequestLimit).Post("/forgot-password", h.ForgotPassword)
+	r.With(passwordResetConfirmLimit).Post("/reset-password", h.ResetPassword)
 	r.With(jwtauth.Verifier(api.TokenAuth)).Post("/logout", h.Logout)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		// Health returns service liveness plus lightweight runtime metadata.
