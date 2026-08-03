@@ -42,3 +42,30 @@ func TestResolveDBURLPrefersParts(t *testing.T) {
 		t.Fatalf("resolveDBURL() did not prefer split database settings: %q", got)
 	}
 }
+
+func TestDemoSeedConfiguration(t *testing.T) {
+	t.Run("disabled seed does not require a password", func(t *testing.T) {
+		t.Setenv("DEMO_SEED", "false")
+		t.Setenv("DEMO_SEED_PASSWORD", "")
+		if demoSeedRequested() {
+			t.Fatal("demo seed should be disabled")
+		}
+	})
+
+	t.Run("enabled seed rejects a short password without starting", func(t *testing.T) {
+		t.Setenv("DEMO_SEED", "true")
+		if !demoSeedRequested() {
+			t.Fatal("demo seed should be requested")
+		}
+		if validSeedPassword("too-short") {
+			t.Fatal("short demo seed password should be rejected")
+		}
+	})
+
+	t.Run("enabled seed accepts a valid password", func(t *testing.T) {
+		t.Setenv("DEMO_SEED", " TRUE ")
+		if !demoSeedRequested() || !validSeedPassword("integration-only-secret") {
+			t.Fatal("valid demo seed configuration should be accepted")
+		}
+	})
+}

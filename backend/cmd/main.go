@@ -241,7 +241,9 @@ func main() {
 		zlog.Fatal().Err(seedErr).Msg("Configured administrator seed failed")
 	}
 	seedCancel()
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("DEMO_SEED")), "true") {
+	if demoSeedRequested() && !validSeedPassword(os.Getenv("DEMO_SEED_PASSWORD")) {
+		zlog.Warn().Msg("Fictional demo seed skipped: DEMO_SEED_PASSWORD must contain between 15 and 72 bytes")
+	} else if demoSeedRequested() {
 		seedCtx, seedCancel = context.WithTimeout(context.Background(), 30*time.Second)
 		if seedErr := service.SeedDemoData(seedCtx, store, ledgerSvc, paymentSvc); seedErr != nil {
 			seedCancel()
@@ -390,4 +392,12 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		zlog.Fatal().Err(err).Msg("Server failed to start")
 	}
+}
+
+func demoSeedRequested() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("DEMO_SEED")), "true")
+}
+
+func validSeedPassword(password string) bool {
+	return len(password) >= 15 && len(password) <= 72
 }
