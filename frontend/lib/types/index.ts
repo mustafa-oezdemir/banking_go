@@ -176,6 +176,8 @@ export interface Transaction {
 export interface RegisterResponse {
   email: string;
   user_id: string;
+	account_id: string;
+	masked_iban: string;
 }
 
 export interface SessionResponse {

@@ -38,6 +38,12 @@ type LedgerService struct {
 	store *db.Store
 }
 
+// FundedCustomer contains the user and default account created during registration.
+type FundedCustomer struct {
+	Account sqlc.Account
+	User    sqlc.CreateUserRow
+}
+
 // NewLedgerService constructs a LedgerService backed by the provided store.
 func NewLedgerService(store *db.Store) *LedgerService {
 	return &LedgerService{store: store}
@@ -45,33 +51,33 @@ func NewLedgerService(store *db.Store) *LedgerService {
 
 // CreateFundedCustomer atomically creates a customer, their default EUR account,
 // and the balanced signup credit. A failed account or ledger write rolls back the user too.
-func (s *LedgerService) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (sqlc.CreateUserRow, error) {
+func (s *LedgerService) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (FundedCustomer, error) {
 	iban, err := sepa.GenerateGermanDemoIBAN()
 	if err != nil {
-		return sqlc.CreateUserRow{}, fmt.Errorf("generate signup account IBAN: %w", err)
+		return FundedCustomer{}, fmt.Errorf("generate signup account IBAN: %w", err)
 	}
 	openingBalance := decimal.RequireFromString(signupOpeningBalance)
-	var user sqlc.CreateUserRow
+	var customer FundedCustomer
 	err = s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		var txErr error
-		user, txErr = q.CreateUser(ctx, input)
+		customer.User, txErr = q.CreateUser(ctx, input)
 		if txErr != nil {
 			return txErr
 		}
-		account, txErr := q.CreateAccount(ctx, sqlc.CreateAccountParams{
-			OwnerID: uuid.NullUUID{UUID: user.ID, Valid: true},
+		customer.Account, txErr = q.CreateAccount(ctx, sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: customer.User.ID, Valid: true},
 			Name:    "Girokonto", Currency: "EUR", IsSystem: false,
 			Iban: iban, AccountType: "GIROKONTO", Status: "ACTIVE",
 		})
 		if txErr != nil {
 			return txErr
 		}
-		return s.depositTx(ctx, q, account.ID, openingBalance)
+		return s.depositTx(ctx, q, customer.Account.ID, openingBalance)
 	})
 	if err != nil {
-		return sqlc.CreateUserRow{}, err
+		return FundedCustomer{}, err
 	}
-	return user, nil
+	return customer, nil
 }
 
 // Deposit external money into user account

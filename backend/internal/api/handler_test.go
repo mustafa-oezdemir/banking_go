@@ -72,12 +72,18 @@ func TestRegisterHandler_Success(t *testing.T) {
 
 	h.Register(rw, req)
 	assert.Equal(t, http.StatusCreated, rw.Code)
+	var registerResponse RegisterResponse
+	require.NoError(t, json.NewDecoder(rw.Body).Decode(&registerResponse))
 	user, err := h.store.GetUserByEmail(t.Context(), email)
 	require.NoError(t, err)
 	accounts, err := h.store.ListAccountsByOwner(t.Context(), uuid.NullUUID{UUID: user.ID, Valid: true})
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	assert.Equal(t, "EUR", accounts[0].Currency)
+	assert.Equal(t, "GIROKONTO", accounts[0].AccountType)
+	require.NoError(t, sepa.ValidateIBAN(accounts[0].Iban))
+	assert.Equal(t, accounts[0].ID.String(), registerResponse.AccountID)
+	assert.Equal(t, sepa.MaskIBAN(accounts[0].Iban), registerResponse.MaskedIBAN)
 	assert.Equal(t, "500.0000", accounts[0].Balance)
 	calculatedBalance, err := h.store.GetAccountBalance(t.Context(), accounts[0].ID)
 	require.NoError(t, err)

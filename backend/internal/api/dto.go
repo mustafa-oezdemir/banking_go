@@ -44,8 +44,10 @@ type EntryResponse struct {
 
 // RegisterResponse is returned after successful registration.
 type RegisterResponse struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
+	UserID     string `json:"user_id"`
+	Email      string `json:"email"`
+	AccountID  string `json:"account_id"`
+	MaskedIBAN string `json:"masked_iban"`
 }
 
 // SessionResponse describes the authenticated browser session.

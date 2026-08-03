@@ -134,7 +134,11 @@ definitions:
     type: object
   api.RegisterResponse:
     properties:
+      account_id:
+        type: string
       email:
+        type: string
+      masked_iban:
         type: string
       user_id:
         type: string

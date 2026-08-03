@@ -121,7 +121,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Atomically persist the user, their EUR account, and the balanced signup credit.
-	user, err := h.ledger.CreateFundedCustomer(r.Context(), sqlc.CreateUserParams{
+	customer, err := h.ledger.CreateFundedCustomer(r.Context(), sqlc.CreateUserParams{
 		Email:          email,
 		HashedPassword: string(hashed),
 		FullName:       defaultFullName(input.FullName, email),
@@ -132,7 +132,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := GenerateToken(user.ID)
+	token, err := GenerateToken(customer.User.ID)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to generate token")
 		respondError(w, http.StatusInternalServerError, "failed to generate token")
@@ -142,8 +142,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	log.Info().Msg("User registered successfully")
 	respondJSON(w, http.StatusCreated, RegisterResponse{
-		UserID: user.ID.String(),
-		Email:  user.Email,
+		UserID:     customer.User.ID.String(),
+		Email:      customer.User.Email,
+		AccountID:  customer.Account.ID.String(),
+		MaskedIBAN: sepa.MaskIBAN(customer.Account.Iban),
 	})
 }
 

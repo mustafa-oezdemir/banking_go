@@ -1565,7 +1565,13 @@ const docTemplate = `{
         "api.RegisterResponse": {
             "type": "object",
             "properties": {
+                "account_id": {
+                    "type": "string"
+                },
                 "email": {
+                    "type": "string"
+                },
+                "masked_iban": {
                     "type": "string"
                 },
                 "user_id": {
