@@ -146,6 +146,12 @@ func TestSamePaymentIntentRejectsIdempotencyPayloadChange(t *testing.T) {
 	}
 	assert.True(t, samePaymentIntent(order, input, decimal.RequireFromString("10")))
 
+	postgresRounded := input
+	postgresRounded.RequestedExecution = execution.Add(600 * time.Nanosecond)
+	order.RequestedExecutionAt = postgresRounded.RequestedExecution.Round(time.Microsecond)
+	assert.True(t, samePaymentIntent(order, postgresRounded, decimal.RequireFromString("10")))
+	order.RequestedExecutionAt = execution
+
 	changes := []func(*CreatePaymentInput){
 		func(value *CreatePaymentInput) { value.BeneficiaryName = "Different Name" },
 		func(value *CreatePaymentInput) { value.Purpose = "Geänderter Zweck" },

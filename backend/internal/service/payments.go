@@ -172,6 +172,10 @@ func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentI
 	execution := input.RequestedExecution
 	if input.ScheduleType == ScheduleImmediate {
 		execution = s.now().UTC()
+	} else {
+		// PostgreSQL stores timestamps at microsecond precision. Canonicalize the
+		// value before insertion so an idempotent replay compares the same value.
+		execution = execution.UTC().Round(time.Microsecond)
 	}
 	endToEndID := "DEMO-" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))[:27]
 	params := sqlc.CreatePaymentOrderParams{
@@ -447,12 +451,13 @@ func samePaymentIntent(order sqlc.PaymentOrder, input CreatePaymentInput, amount
 	}
 	sameExecution := true
 	if input.ScheduleType == ScheduleScheduled {
-		// PostgreSQL timestamps retain microseconds while time.Now may carry
-		// nanoseconds. Compare at the storage precision so an exact replay is
-		// not mistaken for a different payment intent.
-		storedExecution := order.RequestedExecutionAt.UTC().Truncate(time.Microsecond)
-		requestedExecution := input.RequestedExecution.UTC().Truncate(time.Microsecond)
-		sameExecution = storedExecution.Equal(requestedExecution)
+		// PostgreSQL rounds timestamps to microseconds. Accept that storage-only
+		// difference so the original request remains an idempotent replay.
+		executionDelta := order.RequestedExecutionAt.UTC().Sub(input.RequestedExecution.UTC())
+		if executionDelta < 0 {
+			executionDelta = -executionDelta
+		}
+		sameExecution = executionDelta <= time.Microsecond
 	}
 	wantsInstant := input.TransferType == PaymentInstant
 	isInstant := order.PaymentKind == "SEPA_INSTANT"
