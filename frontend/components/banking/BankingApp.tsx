@@ -370,6 +370,7 @@ function AdminPanel() {
 	const [message, setMessage] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [adjustingAccountID, setAdjustingAccountID] = useState<string | null>(null);
+	const [updatingStatusAccountID, setUpdatingStatusAccountID] = useState<string | null>(null);
 
 	const load = useCallback(async () => {
 		setLoading(true);
@@ -396,9 +397,14 @@ function AdminPanel() {
 		await load();
 	};
 	const updateStatus = async (accountId: string, status: "ACTIVE" | "BLOCKED") => {
-		const result = await updateAdminAccountStatus(accountId, status);
-		if (!result.response.ok) { setMessage("Kontostatus konnte nicht geändert werden."); return; }
-		await load();
+		setUpdatingStatusAccountID(accountId);
+		try {
+			const result = await updateAdminAccountStatus(accountId, status);
+			if (!result.response.ok) { setMessage("Kontostatus konnte nicht geändert werden."); return; }
+			await load();
+		} finally {
+			setUpdatingStatusAccountID(null);
+		}
 	};
 	const adjust = async (accountId: string, operation: "DEPOSIT" | "WITHDRAW") => {
 		const amount = normalizeAdminAmount(amounts[accountId] || "");
@@ -420,24 +426,78 @@ function AdminPanel() {
 		{message && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}
 		<div className="grid gap-4 sm:grid-cols-3"><Stat label="Benutzer" value={String(overview.users.length)} accent="blue" /><Stat label="Konten" value={String(overview.accounts.length)} accent="green" /><Stat label="Zahlungsaufträge" value={String(overview.payment_count)} accent="amber" /></div>
 		<Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><h2 className="font-bold">Benutzerverwaltung</h2></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Benutzer</th><th className="p-3">Konten</th><th className="p-3">Gesamtsaldo</th><th className="p-3">Rolle</th></tr></thead><tbody className="divide-y divide-slate-100">{overview.users.map((user) => <tr key={user.id}><td className="p-3"><p className="font-semibold">{user.full_name}</p><p className="text-xs text-slate-500">{user.email}</p></td><td className="p-3">{user.account_count}</td><td className="p-3 font-semibold">{formatCurrency(user.total_balance)}</td><td className="p-3"><select aria-label={`Rolle für ${user.email}`} className="bank-input min-w-32" value={user.role} onChange={(event) => void updateRole(user.id, event.target.value as "CUSTOMER" | "ADMIN")}><option value="CUSTOMER">Kunde</option><option value="ADMIN">Admin</option></select></td></tr>)}</tbody></table></div></Card>
-		<Card className="overflow-hidden">
-			<div className="border-b border-slate-100 p-5"><h2 className="font-bold">Kontenverwaltung</h2><p className="mt-1 text-xs text-slate-500">Gutschriften und Belastungen werden als ausgeglichene Ledger-Buchungen erfasst.</p></div>
-			<div className="divide-y divide-slate-100">{overview.accounts.map((account) => {
-				const amount = amounts[account.id] || "";
-				const disabled = !isValidAdminAmount(amount) || adjustingAccountID === account.id;
-				return <div key={account.id} className="grid gap-4 p-4 lg:grid-cols-[1.15fr_.75fr_140px_minmax(330px,1fr)] lg:items-center">
-					<div><p className="font-semibold">{account.name}</p><p className="text-xs text-slate-500">{account.owner_name} · {account.owner_email}</p><p className="mt-1 font-mono text-xs text-slate-400">{account.masked_iban}</p></div>
-					<div><p className="font-bold">{formatCurrency(account.balance)}</p><p className="text-xs text-slate-500">{account.account_type}</p></div>
-					<select aria-label={`Status für ${account.name}`} className="bank-input" value={account.status} onChange={(event) => void updateStatus(account.id, event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select>
-					<div className="grid grid-cols-2 gap-2">
-						<input aria-label={`Betrag für ${account.name}`} className="bank-input col-span-2 min-w-0" inputMode="decimal" placeholder="Betrag EUR" value={amount} onChange={(event) => setAmounts((current) => ({ ...current, [account.id]: event.target.value }))} />
-						<button type="button" disabled={disabled} aria-label={`Gutschrift für ${account.name}`} className="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "DEPOSIT")}><span aria-hidden="true">+</span></button>
-						<button type="button" disabled={disabled} aria-label={`Belastung für ${account.name}`} className="min-h-11 rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "WITHDRAW")}><span aria-hidden="true">−</span></button>
+		<Card className="overflow-hidden border-slate-200 shadow-[0_12px_40px_rgba(15,23,42,.07)]">
+			<div className="flex flex-col gap-4 border-b border-slate-200 bg-gradient-to-r from-[#f5f9fc] via-white to-[#f6fbf9] p-5 sm:flex-row sm:items-center sm:justify-between md:p-6">
+				<div className="flex items-start gap-3">
+					<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#003b70] text-white shadow-sm">
+						<svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="1.8"><path d="M4 10h16M5.5 10v7.5m4-7.5v7.5m5-7.5v7.5m4-7.5v7.5M3 20h18M12 3l9 4H3l9-4Z" strokeLinecap="round" strokeLinejoin="round" /></svg>
 					</div>
-				</div>;
-			})}</div>
+					<div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#0066a1]">Kontooperationen</p><h2 className="mt-1 text-xl font-bold tracking-tight">Kontenverwaltung</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Kontostatus verwalten und revisionssichere, ausgeglichene Ledger-Buchungen ausführen.</p></div>
+				</div>
+				<span className="w-fit rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm">{overview.accounts.length} {overview.accounts.length === 1 ? "Konto" : "Konten"}</span>
+			</div>
+			<div className="grid gap-4 bg-slate-50/60 p-4 md:p-5 xl:grid-cols-2">
+				{overview.accounts.map((account) => <AdminAccountCard
+					key={account.id}
+					account={account}
+					amount={amounts[account.id] || ""}
+					adjusting={adjustingAccountID === account.id}
+					updatingStatus={updatingStatusAccountID === account.id}
+					onAmountChange={(value) => setAmounts((current) => ({ ...current, [account.id]: value }))}
+					onStatusChange={(status) => void updateStatus(account.id, status)}
+					onAdjust={(operation) => void adjust(account.id, operation)}
+				/>)}
+			</div>
 		</Card>
 	</div>;
+}
+
+function AdminAccountCard({ account, amount, adjusting, updatingStatus, onAmountChange, onStatusChange, onAdjust }: {
+	account: AdminOverview["accounts"][number];
+	amount: string;
+	adjusting: boolean;
+	updatingStatus: boolean;
+	onAmountChange: (value: string) => void;
+	onStatusChange: (status: "ACTIVE" | "BLOCKED") => void;
+	onAdjust: (operation: "DEPOSIT" | "WITHDRAW") => void;
+}) {
+	const validAmount = isValidAdminAmount(amount);
+	const controlsDisabled = !validAmount || adjusting;
+	const active = account.status === "ACTIVE";
+	const initial = (account.owner_name || account.name).trim().charAt(0).toUpperCase();
+
+	return <article className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,.04)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_28px_rgba(15,23,42,.08)] sm:p-5">
+		<header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+			<div className="flex min-w-0 items-center gap-3">
+				<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#0066a1] to-[#003b70] text-sm font-bold text-white shadow-sm">{initial}</div>
+				<div className="min-w-0"><h3 className="truncate font-bold text-slate-900">{account.name}</h3><p className="mt-0.5 truncate text-xs text-slate-500">{account.owner_name} · {account.owner_email}</p><p className="mt-1 font-mono text-[11px] tracking-wide text-slate-400">{account.masked_iban}</p></div>
+			</div>
+			<label className="relative block shrink-0">
+				<span className={`pointer-events-none absolute left-3 top-1/2 z-10 h-2 w-2 -translate-y-1/2 rounded-full ${active ? "bg-emerald-500" : "bg-rose-500"}`} />
+				<select aria-label={`Status für ${account.name}`} disabled={updatingStatus} className="min-h-10 appearance-none rounded-full border border-slate-200 bg-slate-50 py-2 pl-8 pr-9 text-xs font-bold text-slate-700 outline-none transition hover:border-slate-300 focus:border-[#0066a1] focus:ring-4 focus:ring-blue-100 disabled:cursor-wait disabled:opacity-60" value={account.status} onChange={(event) => onStatusChange(event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select>
+				<svg aria-hidden="true" viewBox="0 0 20 20" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 fill-slate-500"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" /></svg>
+			</label>
+		</header>
+
+		<div className="mt-5 grid grid-cols-2 gap-3">
+			<div className="col-span-2 rounded-xl bg-gradient-to-br from-[#003b70] to-[#0066a1] p-4 text-white shadow-sm"><p className="text-xs font-medium text-blue-100">Kontostand</p><p className="mt-1 text-2xl font-bold tabular-nums tracking-tight">{formatCurrency(account.balance)}</p><p className="mt-2 text-xs text-blue-100">Verfügbar: <span className="font-semibold text-white">{formatCurrency(account.available_balance)}</span></p></div>
+			<div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Kontotyp</p><p className="mt-1 text-sm font-semibold text-slate-700">{account.account_type === "GIROKONTO" ? "Girokonto" : account.account_type === "SPARKONTO" ? "Sparkonto" : account.account_type}</p></div>
+			<div className="rounded-xl border border-slate-100 bg-slate-50 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Letzte Änderung</p><p className="mt-1 text-sm font-semibold text-slate-700">{formatDate(account.updated_at)}</p></div>
+		</div>
+
+		<div className="mt-5 border-t border-slate-100 pt-5">
+			<div className="mb-2 flex items-center justify-between gap-3"><label htmlFor={`admin-amount-${account.id}`} className="text-xs font-bold uppercase tracking-wider text-slate-500">Ledger-Buchung</label><span className="text-[11px] text-slate-400">EUR · max. 2 Dezimalstellen</span></div>
+			<div className="relative">
+				<input id={`admin-amount-${account.id}`} aria-label={`Betrag für ${account.name}`} className={`min-h-12 w-full rounded-xl border bg-white px-4 pr-14 text-base font-semibold tabular-nums outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:ring-4 ${amount && !validAmount ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 hover:border-slate-300 focus:border-[#0066a1] focus:ring-blue-100"}`} inputMode="decimal" placeholder="0,00" value={amount} onChange={(event) => onAmountChange(event.target.value)} />
+				<span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">EUR</span>
+			</div>
+			{amount && !validAmount && <p className="mt-1.5 text-xs font-medium text-rose-600">Bitte einen positiven Betrag mit maximal zwei Dezimalstellen eingeben.</p>}
+			<div className="mt-3 grid gap-2 sm:grid-cols-2">
+				<button type="button" disabled={controlsDisabled} className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 hover:shadow disabled:cursor-not-allowed disabled:opacity-40" onClick={() => onAdjust("DEPOSIT")}><span aria-hidden="true" className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-base">+</span>{adjusting ? "Wird gebucht…" : "Gutschrift"}</button>
+				<button type="button" disabled={controlsDisabled} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-bold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => onAdjust("WITHDRAW")}><span aria-hidden="true" className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-200/70 text-base">−</span>{adjusting ? "Wird gebucht…" : "Belasten"}</button>
+			</div>
+		</div>
+	</article>;
 }
 
 function normalizeAdminAmount(value: string): string {
