@@ -5,7 +5,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: main
+    branch: codex/sepa-demo-banking
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
     envVars:
@@ -20,7 +20,7 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         value: https://pehlione-banking.com,https://www.pehlione-banking.com,https://pehlione-banking-frontend.onrender.com,https://banking-go.onrender.com
       - key: DEMO_SEED
-        value: false
+        value: true
       - key: ENABLE_IN_PROCESS_SCHEDULER
         value: true
       - key: RUN_DB_MIGRATIONS_ON_START
@@ -33,14 +33,14 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: main
+    branch: codex/sepa-demo-banking
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     envVars:
       - key: PORT
         value: 3000
       - key: BACKEND_API_URL
-        value: https://pehlione-banking.onrender.com
+        value: https://banking-go.onrender.com
     healthCheckPath: /
 
 # PostgreSQL Database
