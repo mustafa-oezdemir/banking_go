@@ -6,10 +6,16 @@ A simulation-only banking application built with Go, PostgreSQL and Next.js. It 
 
 > **Demo-Banking – kein echtes Bankkonto.** This project does not connect to SEPA, PSD2, a bank, or a payment provider. It never moves real money and must not be presented as regulated, BaFin-approved, or PSD2-compliant banking software.
 
+- **Live demo:** [pehlione-banking-frontend.onrender.com](https://pehlione-banking-frontend.onrender.com)
+- **API health:** [banking-go.onrender.com/health](https://banking-go.onrender.com/health)
+
 ## What is included
 
 - German-language responsive banking UI: Übersicht, Konten, Umsätze, Überweisen, Terminüberweisungen, Daueraufträge, Empfänger, Profil und Sicherheit.
 - Every new registration atomically receives a default EUR Girokonto with a fictional €500 opening balance.
+- Account owners can reveal their full IBAN on demand, copy it, or share it through the browser share sheet; list responses remain masked.
+- The responsive navigation works as a collapsible desktop sidebar and an overlay drawer on mobile.
+- Administrators can manage user roles, account states and fictional demo balances through the administration view.
 - Six-step payment wizard with explicit demo consent.
 - German-format demo IBAN generation with MOD-97 validation and a database uniqueness constraint.
 - Umbuchung, internal demo transfer, simulated SEPA, simulated SEPA Instant, scheduled payments and standing orders.
@@ -64,6 +70,17 @@ The seed creates the fictional users `anna.beispiel@demo.invalid` and
 `DEMO_SEED_PASSWORD`. Never reuse that secret for a real account.
 
 The `.invalid` domain and all names, balances and transactions are fictional. Set `DEMO_SEED=false` outside an isolated demo.
+
+### Administrator bootstrap
+
+To create or update one administrator at application startup, configure both values below as Render secrets or local environment variables:
+
+```env
+ADMIN_SEED_EMAIL=admin@example.invalid
+ADMIN_SEED_PASSWORD=<unique-secret-with-15-to-72-bytes>
+```
+
+Do not commit a real password. If either value is absent, administrator bootstrap is skipped. New public registrations always receive the `CUSTOMER` role and cannot promote themselves.
 
 ## Development and verification
 
@@ -122,7 +139,17 @@ This is intentionally a demonstration of payment orchestration, not real Strong 
 
 ## Render deployment profiles
 
-The default [`render.yaml`](render.yaml) keeps the existing Frankfurt region and deploys free web services plus PostgreSQL. Secrets are generated or injected by Render and are not stored in the repository.
+The default [`render.yaml`](render.yaml) deploys the `main` branch to the Frankfurt region as two free web services plus PostgreSQL. Secrets are generated or injected by Render and are not stored in the repository.
+
+### Deploy the Blueprint
+
+1. Fork or connect this repository in Render and choose **New → Blueprint**.
+2. Select `render.yaml` from the `main` branch.
+3. Set `ADMIN_SEED_PASSWORD` to a unique 15–72 byte secret if administrator bootstrap is wanted.
+4. Leave `DEMO_SEED=false` for a clean public deployment. If demo seed data is enabled, also set a different 15–72 byte `DEMO_SEED_PASSWORD`.
+5. Deploy the Blueprint. The backend runs database migrations before startup; the frontend proxies authenticated API and SSE traffic to `BACKEND_API_URL`.
+
+After deployment, verify the backend `/health` endpoint, register a customer, and confirm that the generated Girokonto shows a fictional €500 balance. Render must redeploy both services after environment-variable changes.
 
 ### 1. Free demo
 

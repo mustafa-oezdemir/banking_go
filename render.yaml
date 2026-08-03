@@ -5,7 +5,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: codex/sepa-demo-banking
+    branch: main
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
     envVars:
@@ -39,7 +39,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    branch: codex/sepa-demo-banking
+    branch: main
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     envVars:
