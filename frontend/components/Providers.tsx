@@ -7,6 +7,7 @@
 
 import { useEffect } from "react";
 import { useAuthStore } from "@/lib/store/authStore";
+import { clearPageRecoveryMarker } from "@/lib/pageRecovery";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -20,7 +21,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
     window.addEventListener("auth:logout", handleLogout);
     // Validate the HttpOnly cookie session before hydrating client state.
     void hydrate();
-    return () => window.removeEventListener("auth:logout", handleLogout);
+    const recoveryTimer = window.setTimeout(clearPageRecoveryMarker, 10_000);
+    return () => {
+      window.removeEventListener("auth:logout", handleLogout);
+      window.clearTimeout(recoveryTimer);
+    };
   }, [hydrate]);
 
   // Always render children - hydration happens in useEffect above
