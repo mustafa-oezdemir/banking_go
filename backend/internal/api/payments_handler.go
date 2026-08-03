@@ -323,6 +323,7 @@ func (h *Handler) UpdateStandingOrder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	//nolint:govet // Field order mirrors the public PATCH payload.
 	var input struct {
 		Amount         string `json:"amount"`
 		Purpose        string `json:"purpose"`
@@ -425,6 +426,7 @@ func (h *Handler) ListAccountTransactions(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusOK, response)
 }
 
+// ListBeneficiaries returns the authenticated owner's saved demo payees.
 func (h *Handler) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -442,6 +444,7 @@ func (h *Handler) ListBeneficiaries(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, items)
 }
 
+// CreateBeneficiary validates and saves a demo payee for the authenticated owner.
 func (h *Handler) CreateBeneficiary(w http.ResponseWriter, r *http.Request) {
 	ownerID, err := authenticatedUserID(r)
 	if err != nil {
@@ -493,13 +496,22 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	if deadlineErr := http.NewResponseController(w).SetWriteDeadline(time.Time{}); deadlineErr != nil && !errors.Is(deadlineErr, http.ErrNotSupported) {
+		respondError(w, http.StatusInternalServerError, "failed to initialize event stream")
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	afterID, _ := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64)
+	var afterID int64
+	if lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID")); lastEventID != "" {
+		parsedID, parseErr := strconv.ParseInt(lastEventID, 10, 64)
+		if parseErr == nil && parsedID > 0 {
+			afterID = parsedID
+		}
+	}
 	updates, unsubscribe := h.payments.EventHub().Subscribe(ownerID)
 	defer unsubscribe()
 	ticker := time.NewTicker(20 * time.Second)
@@ -583,8 +595,14 @@ func respondPaymentError(w http.ResponseWriter, err error) {
 }
 
 func pagination(r *http.Request) (int32, int32) {
-	limitValue, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offsetValue, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limitValue, limitErr := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 32)
+	if limitErr != nil {
+		limitValue = 0
+	}
+	offsetValue, offsetErr := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 32)
+	if offsetErr != nil {
+		offsetValue = 0
+	}
 	if limitValue <= 0 || limitValue > 100 {
 		limitValue = 50
 	}

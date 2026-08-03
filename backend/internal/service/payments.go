@@ -20,27 +20,44 @@ import (
 )
 
 const (
+	// PaymentAwaitingConfirmation is the state before explicit demo consent.
 	PaymentAwaitingConfirmation = "AWAITING_CONFIRMATION"
-	PaymentScheduled            = "SCHEDULED"
-	PaymentProcessing           = "PROCESSING"
-	PaymentBooked               = "BOOKED"
-	PaymentFailed               = "FAILED"
+	// PaymentScheduled is the state of a confirmed future payment.
+	PaymentScheduled = "SCHEDULED"
+	// PaymentProcessing is the exclusively claimed booking state.
+	PaymentProcessing = "PROCESSING"
+	// PaymentBooked is the terminal successful state.
+	PaymentBooked = "BOOKED"
+	// PaymentFailed is the terminal rejected or failed state.
+	PaymentFailed = "FAILED"
 
+	// ScheduleImmediate requests processing during confirmation.
 	ScheduleImmediate = "IMMEDIATE"
+	// ScheduleScheduled requests processing at a future execution time.
 	ScheduleScheduled = "SCHEDULED"
 
+	// PaymentStandard selects the simulated standard transfer rail.
 	PaymentStandard = "STANDARD"
-	PaymentInstant  = "INSTANT"
+	// PaymentInstant selects the simulated instant transfer rail.
+	PaymentInstant = "INSTANT"
 )
 
 var (
-	ErrPaymentNotFound      = errors.New("payment order not found")
-	ErrInvalidPaymentState  = errors.New("payment cannot transition from its current state")
-	ErrVoPOverrideRequired  = errors.New("explicit confirmation is required for this payee verification result")
-	ErrIdempotencyConflict  = errors.New("idempotency key was already used for a different payment")
-	ErrAccountBlocked       = errors.New("account is not active")
-	ErrPaymentUnauthorized  = errors.New("source account does not belong to the authenticated user")
-	ErrInvalidPaymentInput  = errors.New("invalid payment input")
+	// ErrPaymentNotFound indicates an unknown or owner-inaccessible payment.
+	ErrPaymentNotFound = errors.New("payment order not found")
+	// ErrInvalidPaymentState indicates a disallowed state-machine transition.
+	ErrInvalidPaymentState = errors.New("payment cannot transition from its current state")
+	// ErrVoPOverrideRequired requires explicit consent for a non-match result.
+	ErrVoPOverrideRequired = errors.New("explicit confirmation is required for this payee verification result")
+	// ErrIdempotencyConflict indicates reuse of a key with a changed intent.
+	ErrIdempotencyConflict = errors.New("idempotency key was already used for a different payment")
+	// ErrAccountBlocked indicates that the source or destination is inactive.
+	ErrAccountBlocked = errors.New("account is not active")
+	// ErrPaymentUnauthorized indicates that the source is not owned by the caller.
+	ErrPaymentUnauthorized = errors.New("source account does not belong to the authenticated user")
+	// ErrInvalidPaymentInput indicates malformed payment intent data.
+	ErrInvalidPaymentInput = errors.New("invalid payment input")
+	// ErrStandingOrderInvalid indicates malformed recurring-payment data.
 	ErrStandingOrderInvalid = errors.New("invalid standing order")
 )
 
@@ -51,6 +68,7 @@ type PaymentService struct {
 	now   func() time.Time
 }
 
+// NewPaymentService creates a payment orchestration service for a store.
 func NewPaymentService(store *db.Store, hub *EventHub) *PaymentService {
 	if hub == nil {
 		hub = NewEventHub()
@@ -58,8 +76,12 @@ func NewPaymentService(store *db.Store, hub *EventHub) *PaymentService {
 	return &PaymentService{store: store, hub: hub, now: time.Now}
 }
 
+// EventHub returns the service's lightweight SSE notification hub.
 func (s *PaymentService) EventHub() *EventHub { return s.hub }
 
+// CreatePaymentInput describes one normalized payment intent.
+//
+//nolint:govet // Group fields by payment semantics instead of memory layout.
 type CreatePaymentInput struct {
 	OwnerID            uuid.UUID
 	SourceAccountID    uuid.UUID
@@ -76,6 +98,7 @@ type CreatePaymentInput struct {
 	StandingOrderID    uuid.NullUUID
 }
 
+// CreatePaymentResult contains a new or idempotently replayed order.
 type CreatePaymentResult struct {
 	Order    sqlc.PaymentOrder
 	Replayed bool
@@ -259,6 +282,7 @@ func (s *PaymentService) ConfirmPayment(ctx context.Context, ownerID, paymentID 
 	return result, businessErr
 }
 
+// CancelPayment cancels an owner-authorized draft or scheduled order.
 func (s *PaymentService) CancelPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
 	order, err := s.store.CancelPaymentOrder(ctx, sqlc.CancelPaymentOrderParams{PaymentOrderID: paymentID, OwnerID: ownerID})
 	if err == sql.ErrNoRows {
@@ -274,6 +298,7 @@ func (s *PaymentService) CancelPayment(ctx context.Context, ownerID, paymentID u
 	return order, nil
 }
 
+// GetPayment returns one owner-authorized payment order.
 func (s *PaymentService) GetPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
 	order, err := s.store.GetPaymentOrder(ctx, paymentID)
 	if err == sql.ErrNoRows || order.OwnerID != ownerID {
@@ -282,6 +307,7 @@ func (s *PaymentService) GetPayment(ctx context.Context, ownerID, paymentID uuid
 	return order, err
 }
 
+// ListPayments returns a page of payment orders for an owner.
 func (s *PaymentService) ListPayments(ctx context.Context, ownerID uuid.UUID, limit, offset int32) ([]sqlc.PaymentOrder, error) {
 	return s.store.ListPaymentOrdersByOwner(ctx, sqlc.ListPaymentOrdersByOwnerParams{
 		OwnerID: ownerID, ResultLimit: limit, ResultOffset: offset,
@@ -293,7 +319,7 @@ func (s *PaymentService) bookPaymentTx(ctx context.Context, q *sqlc.Queries, ord
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
 		return sqlc.PaymentOrder{}, ErrInvalidAmount
 	}
-	destinationID := uuid.Nil
+	var destinationID uuid.UUID
 	if order.BeneficiaryAccountID.Valid {
 		destinationID = order.BeneficiaryAccountID.UUID
 	} else {
@@ -421,7 +447,12 @@ func samePaymentIntent(order sqlc.PaymentOrder, input CreatePaymentInput, amount
 	}
 	sameExecution := true
 	if input.ScheduleType == ScheduleScheduled {
-		sameExecution = order.RequestedExecutionAt.Equal(input.RequestedExecution.UTC())
+		// PostgreSQL timestamps retain microseconds while time.Now may carry
+		// nanoseconds. Compare at the storage precision so an exact replay is
+		// not mistaken for a different payment intent.
+		storedExecution := order.RequestedExecutionAt.UTC().Truncate(time.Microsecond)
+		requestedExecution := input.RequestedExecution.UTC().Truncate(time.Microsecond)
+		sameExecution = storedExecution.Equal(requestedExecution)
 	}
 	wantsInstant := input.TransferType == PaymentInstant
 	isInstant := order.PaymentKind == "SEPA_INSTANT"
@@ -477,7 +508,7 @@ func categorizePurpose(purpose string) string {
 	value := strings.ToLower(purpose)
 	for category, words := range map[string][]string{
 		"Wohnen":       {"miete", "wohnung", "strom"},
-		"Lebensmittel": {"markt", "supermarkt", "lebensmittel"},
+		"Lebensmittel": {"markt", "supermarkt", "lebensmittel"}, //nolint:misspell // Correct German term.
 		"Mobilität":    {"bahn", "ticket", "verkehr", "tanken"},
 		"Abonnements":  {"abo", "netflix", "spotify", "subscription"},
 		"Gehalt":       {"gehalt", "lohn"},

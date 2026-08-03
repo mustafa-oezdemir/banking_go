@@ -22,6 +22,8 @@ type AccountResponse struct {
 }
 
 // EntryResponse represents a ledger entry returned by the API.
+//
+//nolint:govet // This layout follows the transaction JSON schema.
 type EntryResponse struct {
 	CreatedAt        time.Time  `json:"created_at"`
 	ID               string     `json:"id"`

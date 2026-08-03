@@ -12,10 +12,14 @@ import (
 )
 
 const (
-	VoPMatch      = "MATCH"
+	// VoPMatch indicates that the supplied and known payee names match.
+	VoPMatch = "MATCH"
+	// VoPCloseMatch indicates a likely match and includes a safe suggestion.
 	VoPCloseMatch = "CLOSE_MATCH"
-	VoPNoMatch    = "NO_MATCH"
-	VoPOther      = "OTHER"
+	// VoPNoMatch indicates that the supplied name does not match.
+	VoPNoMatch = "NO_MATCH"
+	// VoPOther indicates that this demo could not verify the payee.
+	VoPOther = "OTHER"
 )
 
 // VoPResult is the simulation-only Verification of Payee response. ActualName

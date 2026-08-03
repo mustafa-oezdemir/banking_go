@@ -36,10 +36,10 @@ func setupTestLedger(t *testing.T) *LedgerService {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err = sqlDB.PingContext(ctx); err != nil {
-		_ = sqlDB.Close()
+		require.NoError(t, sqlDB.Close())
 		t.Skipf("PostgreSQL integration test unavailable: %v", err)
 	}
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 	store := db.NewStore(sqlDB)
 	ledger := NewLedgerService(store)
 	return ledger

@@ -55,14 +55,20 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	time.Sleep(1200 * time.Millisecond)
 
 	var workers sync.WaitGroup
+	workerErrors := make(chan error, 2)
 	workers.Add(2)
 	for range 2 {
 		go func() {
 			defer workers.Done()
-			_, _ = service.RunDuePayments(ctx, 25)
+			_, runErr := service.RunDuePayments(ctx, 25)
+			workerErrors <- runErr
 		}()
 	}
 	workers.Wait()
+	close(workerErrors)
+	for workerErr := range workerErrors {
+		require.NoError(t, workerErr)
+	}
 	_, err = service.RunDuePayments(ctx, 25)
 	require.NoError(t, err)
 

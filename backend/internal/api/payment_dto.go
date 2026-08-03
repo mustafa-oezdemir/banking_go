@@ -7,6 +7,9 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
+// PaymentResponse is the owner-authorized representation of a payment order.
+//
+//nolint:govet // Field order mirrors the public payment JSON schema.
 type PaymentResponse struct {
 	ID                    string     `json:"id"`
 	SourceAccountID       string     `json:"source_account_id"`
@@ -61,6 +64,9 @@ func toPaymentResponse(order sqlc.PaymentOrder, detail bool) PaymentResponse {
 	return response
 }
 
+// StandingOrderRequest contains the fields accepted when creating a standing order.
+//
+//nolint:govet // Field order mirrors the public creation payload.
 type StandingOrderRequest struct {
 	SourceAccountID   string `json:"source_account_id"`
 	BeneficiaryName   string `json:"beneficiary_name"`
@@ -76,6 +82,9 @@ type StandingOrderRequest struct {
 	MaxOccurrences    *int32 `json:"max_occurrences"`
 }
 
+// StandingOrderResponse is the API representation of a recurring payment.
+//
+//nolint:govet // Field order mirrors the public standing-order JSON schema.
 type StandingOrderResponse struct {
 	ID                    string     `json:"id"`
 	SourceAccountID       string     `json:"source_account_id"`

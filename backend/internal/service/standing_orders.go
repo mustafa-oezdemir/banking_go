@@ -14,6 +14,9 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
+// CreateStandingOrderInput contains validated recurring-payment intent fields.
+//
+//nolint:govet // Group fields by recurring-payment semantics instead of memory layout.
 type CreateStandingOrderInput struct {
 	OwnerID           uuid.UUID
 	SourceAccountID   uuid.UUID
@@ -30,6 +33,7 @@ type CreateStandingOrderInput struct {
 	MaxOccurrences    *int32
 }
 
+// CreateStandingOrder creates an active recurring payment owned by the source-account holder.
 func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateStandingOrderInput) (sqlc.StandingOrder, error) {
 	input.BeneficiaryName = strings.TrimSpace(input.BeneficiaryName)
 	input.BeneficiaryIBAN = sepa.NormalizeIBAN(input.BeneficiaryIBAN)
@@ -39,8 +43,8 @@ func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateSt
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) || amount.Exponent() < -2 || input.BeneficiaryName == "" {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
 	}
-	if err := sepa.ValidateIBAN(input.BeneficiaryIBAN); err != nil {
-		return sqlc.StandingOrder{}, err
+	if validationErr := sepa.ValidateIBAN(input.BeneficiaryIBAN); validationErr != nil {
+		return sqlc.StandingOrder{}, validationErr
 	}
 	if input.TransferType != PaymentStandard && input.TransferType != PaymentInstant {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
@@ -81,13 +85,17 @@ func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateSt
 		params.MaxOccurrences = sql.NullInt32{Int32: *input.MaxOccurrences, Valid: true}
 	}
 	order, err := s.store.CreateStandingOrder(ctx, params)
-	if err == nil {
-		_ = s.audit(ctx, input.OwnerID, uuid.Nil, "STANDING_ORDER_CREATED", map[string]any{"standing_order_id": order.ID})
-		s.hub.Publish(input.OwnerID)
+	if err != nil {
+		return order, err
 	}
-	return order, err
+	if auditErr := s.audit(ctx, input.OwnerID, uuid.Nil, "STANDING_ORDER_CREATED", map[string]any{"standing_order_id": order.ID}); auditErr != nil {
+		return order, auditErr
+	}
+	s.hub.Publish(input.OwnerID)
+	return order, nil
 }
 
+// UpdateStandingOrder changes the mutable fields of an owner-authorized standing order.
 func (s *PaymentService) UpdateStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID, amount, purpose, status string, endDate *time.Time, maxOccurrences *int32) (sqlc.StandingOrder, error) {
 	value, err := decimal.NewFromString(amount)
 	if err != nil || value.LessThanOrEqual(decimal.Zero) || value.Exponent() < -2 {
@@ -117,6 +125,7 @@ func (s *PaymentService) UpdateStandingOrder(ctx context.Context, ownerID, order
 	return order, err
 }
 
+// CancelStandingOrder prevents a standing order from creating new occurrences.
 func (s *PaymentService) CancelStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID) (sqlc.StandingOrder, error) {
 	order, err := s.store.DeleteStandingOrder(ctx, sqlc.DeleteStandingOrderParams{StandingOrderID: orderID, OwnerID: ownerID})
 	if err == sql.ErrNoRows {

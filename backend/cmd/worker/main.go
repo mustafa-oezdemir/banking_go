@@ -23,7 +23,9 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load(".env", "../.env")
+	if err := godotenv.Load(".env", "../.env"); err != nil {
+		log.Debug().Err(err).Msg("Worker .env file not loaded; using process environment")
+	}
 	connectionURL, err := databaseURL()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Worker database configuration is invalid")
@@ -32,12 +34,22 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Worker failed to open database")
 	}
-	defer connection.Close()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err = connection.PingContext(ctx); err != nil {
+	pingCtx, cancelPing := context.WithTimeout(context.Background(), 10*time.Second)
+	err = connection.PingContext(pingCtx)
+	cancelPing()
+	if err != nil {
+		if closeErr := connection.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("Worker database close failed after connection error")
+		}
 		log.Fatal().Err(err).Msg("Worker failed to connect to database")
 	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("Worker database close failed")
+		}
+	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	paymentService := service.NewPaymentService(db.NewStore(connection), nil)
 	run := func() {
 		processed, runErr := paymentService.RunDuePayments(ctx, 50)

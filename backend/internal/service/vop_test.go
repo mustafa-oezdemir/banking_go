@@ -11,8 +11,8 @@ func TestEvaluateVoPScenarios(t *testing.T) {
 		name       string
 		provided   string
 		actual     string
-		available  bool
 		want       string
+		available  bool
 		suggestion bool
 	}{
 		{name: "match", provided: "Anna Müller", actual: "Anna Müller", available: true, want: VoPMatch},

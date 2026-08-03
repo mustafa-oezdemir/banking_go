@@ -17,6 +17,7 @@ import (
 
 const demoPassword = "Demo-Banking-2026!"
 
+//nolint:govet // Group the user and both demo accounts by domain meaning.
 type demoUser struct {
 	user    sqlc.User
 	current sqlc.Account
@@ -41,10 +42,22 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		return err
 	}
 
-	rentIBAN, _ := sepa.GermanDemoIBANForAccount(9000000001)
-	marketIBAN, _ := sepa.GermanDemoIBANForAccount(9000000002)
-	transitIBAN, _ := sepa.GermanDemoIBANForAccount(9000000003)
-	streamIBAN, _ := sepa.GermanDemoIBANForAccount(9000000004)
+	rentIBAN, err := sepa.GermanDemoIBANForAccount(9000000001)
+	if err != nil {
+		return fmt.Errorf("seed rent IBAN: %w", err)
+	}
+	marketIBAN, err := sepa.GermanDemoIBANForAccount(9000000002)
+	if err != nil {
+		return fmt.Errorf("seed market IBAN: %w", err)
+	}
+	transitIBAN, err := sepa.GermanDemoIBANForAccount(9000000003)
+	if err != nil {
+		return fmt.Errorf("seed transit IBAN: %w", err)
+	}
+	streamIBAN, err := sepa.GermanDemoIBANForAccount(9000000004)
+	if err != nil {
+		return fmt.Errorf("seed streaming IBAN: %w", err)
+	}
 	for _, beneficiary := range []sqlc.CreateBeneficiaryParams{
 		{OwnerID: anna.user.ID, Name: "Beispiel Hausverwaltung GmbH", Iban: rentIBAN, Category: nullString("Wohnen")},
 		{OwnerID: anna.user.ID, Name: "Demo Markt Berlin", Iban: marketIBAN, Category: nullString("Lebensmittel")},
@@ -58,7 +71,7 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 
 	paymentsToCreate := []CreatePaymentInput{
 		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Beispiel Hausverwaltung GmbH", BeneficiaryIBAN: rentIBAN, Amount: "980.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Miete August", IdempotencyKey: "demo-seed-rent-v1"},
-		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Markt Berlin", BeneficiaryIBAN: marketIBAN, Amount: "86.40", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Supermarkt", IdempotencyKey: "demo-seed-market-v1"},
+		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Markt Berlin", BeneficiaryIBAN: marketIBAN, Amount: "86.40", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Supermarkt", IdempotencyKey: "demo-seed-market-v1"}, //nolint:misspell // Correct German term.
 		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Max Mustermann", BeneficiaryIBAN: maxUser.current.Iban, Amount: "24.50", TransferType: PaymentInstant, ScheduleType: ScheduleImmediate, Purpose: "Abendessen", IdempotencyKey: "demo-seed-instant-v1"},
 		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Verkehrsbetriebe", BeneficiaryIBAN: transitIBAN, Amount: "49.00", TransferType: PaymentStandard, ScheduleType: ScheduleScheduled, Purpose: "Deutschlandticket", RequestedExecution: time.Now().UTC().Add(72 * time.Hour), IdempotencyKey: "demo-seed-scheduled-v1"},
 	}

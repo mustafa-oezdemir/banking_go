@@ -14,10 +14,12 @@ import (
 const (
 	// DemoBankCode is intentionally reserved only inside this application.
 	// It is not evidence of reachability and must not be used for real routing.
-	DemoBankCode     = "99999999"
+	DemoBankCode = "99999999"
+	// GermanIBANLength is the required character count for a German IBAN.
 	GermanIBANLength = 22
 )
 
+// ErrInvalidIBAN indicates that an IBAN fails structural or checksum validation.
 var ErrInvalidIBAN = errors.New("invalid IBAN")
 
 // NormalizeIBAN strips spaces and uppercases an IBAN for validation/storage.
@@ -53,7 +55,7 @@ func ValidateIBAN(value string) error {
 			}
 			continue
 		}
-		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z')) {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'Z') {
 			return ErrInvalidIBAN
 		}
 	}
