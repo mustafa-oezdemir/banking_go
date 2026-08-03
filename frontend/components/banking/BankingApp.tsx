@@ -248,6 +248,7 @@ function AdminPanel() {
 	const [amounts, setAmounts] = useState<Record<string, string>>({});
 	const [message, setMessage] = useState("");
 	const [loading, setLoading] = useState(true);
+	const [adjustingAccountID, setAdjustingAccountID] = useState<string | null>(null);
 
 	const load = useCallback(async () => {
 		setLoading(true);
@@ -279,10 +280,17 @@ function AdminPanel() {
 		await load();
 	};
 	const adjust = async (accountId: string, operation: "DEPOSIT" | "WITHDRAW") => {
-		const result = await adjustAdminAccountBalance(accountId, operation, amounts[accountId] || "");
-		if (!result.response.ok) { setMessage("Buchung konnte nicht ausgeführt werden."); return; }
-		setAmounts((current) => ({ ...current, [accountId]: "" }));
-		await load();
+		const amount = normalizeAdminAmount(amounts[accountId] || "");
+		if (!isValidAdminAmount(amount)) return;
+		setAdjustingAccountID(accountId);
+		try {
+			const result = await adjustAdminAccountBalance(accountId, operation, amount);
+			if (!result.response.ok) { setMessage("Buchung konnte nicht ausgeführt werden."); return; }
+			setAmounts((current) => ({ ...current, [accountId]: "" }));
+			await load();
+		} finally {
+			setAdjustingAccountID(null);
+		}
 	};
 
 	if (loading && !overview) return <Loading />;
@@ -291,8 +299,33 @@ function AdminPanel() {
 		{message && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}
 		<div className="grid gap-4 sm:grid-cols-3"><Stat label="Benutzer" value={String(overview.users.length)} accent="blue" /><Stat label="Konten" value={String(overview.accounts.length)} accent="green" /><Stat label="Zahlungsaufträge" value={String(overview.payment_count)} accent="amber" /></div>
 		<Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><h2 className="font-bold">Benutzerverwaltung</h2></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Benutzer</th><th className="p-3">Konten</th><th className="p-3">Gesamtsaldo</th><th className="p-3">Rolle</th></tr></thead><tbody className="divide-y divide-slate-100">{overview.users.map((user) => <tr key={user.id}><td className="p-3"><p className="font-semibold">{user.full_name}</p><p className="text-xs text-slate-500">{user.email}</p></td><td className="p-3">{user.account_count}</td><td className="p-3 font-semibold">{formatCurrency(user.total_balance)}</td><td className="p-3"><select aria-label={`Rolle für ${user.email}`} className="bank-input min-w-32" value={user.role} onChange={(event) => void updateRole(user.id, event.target.value as "CUSTOMER" | "ADMIN")}><option value="CUSTOMER">Kunde</option><option value="ADMIN">Admin</option></select></td></tr>)}</tbody></table></div></Card>
-		<Card className="overflow-hidden"><div className="border-b border-slate-100 p-5"><h2 className="font-bold">Kontenverwaltung</h2><p className="mt-1 text-xs text-slate-500">Gutschriften und Belastungen werden als ausgeglichene Ledger-Buchungen erfasst.</p></div><div className="divide-y divide-slate-100">{overview.accounts.map((account) => <div key={account.id} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_1fr_150px_300px] lg:items-center"><div><p className="font-semibold">{account.name}</p><p className="text-xs text-slate-500">{account.owner_name} · {account.owner_email}</p><p className="mt-1 font-mono text-xs text-slate-400">{account.masked_iban}</p></div><div><p className="font-bold">{formatCurrency(account.balance)}</p><p className="text-xs text-slate-500">{account.account_type}</p></div><select aria-label={`Status für ${account.name}`} className="bank-input" value={account.status} onChange={(event) => void updateStatus(account.id, event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select><div className="flex gap-2"><input aria-label={`Betrag für ${account.name}`} className="bank-input min-w-0" inputMode="decimal" placeholder="Betrag EUR" value={amounts[account.id] || ""} onChange={(event) => setAmounts((current) => ({ ...current, [account.id]: event.target.value }))} /><button className="rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white" onClick={() => void adjust(account.id, "DEPOSIT")}>+</button><button className="rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white" onClick={() => void adjust(account.id, "WITHDRAW")}>−</button></div></div>)}</div></Card>
+		<Card className="overflow-hidden">
+			<div className="border-b border-slate-100 p-5"><h2 className="font-bold">Kontenverwaltung</h2><p className="mt-1 text-xs text-slate-500">Gutschriften und Belastungen werden als ausgeglichene Ledger-Buchungen erfasst.</p></div>
+			<div className="divide-y divide-slate-100">{overview.accounts.map((account) => {
+				const amount = amounts[account.id] || "";
+				const disabled = !isValidAdminAmount(amount) || adjustingAccountID === account.id;
+				return <div key={account.id} className="grid gap-4 p-4 lg:grid-cols-[1.15fr_.75fr_140px_minmax(330px,1fr)] lg:items-center">
+					<div><p className="font-semibold">{account.name}</p><p className="text-xs text-slate-500">{account.owner_name} · {account.owner_email}</p><p className="mt-1 font-mono text-xs text-slate-400">{account.masked_iban}</p></div>
+					<div><p className="font-bold">{formatCurrency(account.balance)}</p><p className="text-xs text-slate-500">{account.account_type}</p></div>
+					<select aria-label={`Status für ${account.name}`} className="bank-input" value={account.status} onChange={(event) => void updateStatus(account.id, event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select>
+					<div className="grid grid-cols-2 gap-2">
+						<input aria-label={`Betrag für ${account.name}`} className="bank-input col-span-2 min-w-0" inputMode="decimal" placeholder="Betrag EUR" value={amount} onChange={(event) => setAmounts((current) => ({ ...current, [account.id]: event.target.value }))} />
+						<button type="button" disabled={disabled} aria-label={`Gutschrift für ${account.name}`} className="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "DEPOSIT")}><span aria-hidden="true">+</span> Gutschrift</button>
+						<button type="button" disabled={disabled} aria-label={`Belastung für ${account.name}`} className="min-h-11 rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "WITHDRAW")}><span aria-hidden="true">−</span> Belastung</button>
+					</div>
+				</div>;
+			})}</div>
+		</Card>
 	</div>;
+}
+
+function normalizeAdminAmount(value: string): string {
+	return value.trim().replace(",", ".");
+}
+
+function isValidAdminAmount(value: string): boolean {
+	const normalized = normalizeAdminAmount(value);
+	return /^\d+(?:\.\d{1,2})?$/.test(normalized) && Number(normalized) > 0;
 }
 
 function Status({ value }: { value: string }) {
