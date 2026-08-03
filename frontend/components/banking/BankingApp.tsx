@@ -387,8 +387,8 @@ function AdminPanel() {
 					<select aria-label={`Status für ${account.name}`} className="bank-input" value={account.status} onChange={(event) => void updateStatus(account.id, event.target.value as "ACTIVE" | "BLOCKED")}><option value="ACTIVE">Aktiv</option><option value="BLOCKED">Gesperrt</option></select>
 					<div className="grid grid-cols-2 gap-2">
 						<input aria-label={`Betrag für ${account.name}`} className="bank-input col-span-2 min-w-0" inputMode="decimal" placeholder="Betrag EUR" value={amount} onChange={(event) => setAmounts((current) => ({ ...current, [account.id]: event.target.value }))} />
-						<button type="button" disabled={disabled} aria-label={`Gutschrift für ${account.name}`} className="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "DEPOSIT")}><span aria-hidden="true">+</span> Gutschrift</button>
-						<button type="button" disabled={disabled} aria-label={`Belastung für ${account.name}`} className="min-h-11 rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "WITHDRAW")}><span aria-hidden="true">−</span> Belastung</button>
+						<button type="button" disabled={disabled} aria-label={`Gutschrift für ${account.name}`} className="min-h-11 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "DEPOSIT")}><span aria-hidden="true">+</span></button>
+						<button type="button" disabled={disabled} aria-label={`Belastung für ${account.name}`} className="min-h-11 rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void adjust(account.id, "WITHDRAW")}><span aria-hidden="true">−</span></button>
 					</div>
 				</div>;
 			})}</div>
