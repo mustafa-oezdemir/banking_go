@@ -1,4 +1,4 @@
-package ledger
+package ledger_test
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	_ "github.com/lib/pq"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
+	ledgerapp "github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
@@ -22,7 +23,12 @@ import (
 // setupTestLedger and helpers would be implemented to provide a testable Service and test DB.
 // For demonstration, these are placeholders. In a real repo, use test containers or a test DB.
 
-func setupTestLedger(t *testing.T) *Service {
+type testLedger struct {
+	*ledgerapp.Service
+	store *db.Store
+}
+
+func setupTestLedger(t *testing.T) *testLedger {
 	// Keep test database configuration separate from the application database.
 	dbURL := os.Getenv("TEST_DB_URL")
 	if dbURL == "" {
@@ -41,11 +47,10 @@ func setupTestLedger(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 	store := db.NewStore(sqlDB)
-	ledger := NewService(store)
-	return ledger
+	return &testLedger{Service: ledgerapp.NewService(db.NewLedgerRepository(store)), store: store}
 }
 
-func createTestAccount(t *testing.T, ledger *Service, balance string) uuid.UUID {
+func createTestAccount(t *testing.T, ledger *testLedger, balance string) uuid.UUID {
 	// Use a unique account name for each test run
 	accName := "Test Account " + uuid.New().String()
 
@@ -74,7 +79,7 @@ func mustDemoIBAN(t *testing.T) string {
 	return iban
 }
 
-func getAccountBalance(t *testing.T, ledger *Service, accountID uuid.UUID) string {
+func getAccountBalance(t *testing.T, ledger *testLedger, accountID uuid.UUID) string {
 	balance, err := ledger.store.GetAccountBalance(context.Background(), accountID)
 	require.NoError(t, err)
 	return balance
@@ -96,7 +101,7 @@ func TestWithdraw_InsufficientFunds(t *testing.T) {
 	accountID := createTestAccount(t, ledger, "50.00")
 	err := ledger.Withdraw(context.Background(), accountID, "100.00")
 	assert.Error(t, err)
-	// Optionally check for ErrInsufficientFunds
+	// Optionally check for ledgerapp.ErrInsufficientFunds
 }
 
 func TestConcurrentDeposits(t *testing.T) {
@@ -133,11 +138,11 @@ func TestLedgerRejectsBlockedAndSystemAccounts(t *testing.T) {
 			IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: status,
 		})
 		require.NoError(t, createErr)
-		require.ErrorIs(t, ledger.Deposit(context.Background(), account.ID, "10.00"), ErrAccountBlocked)
-		require.ErrorIs(t, ledger.Withdraw(context.Background(), account.ID, "10.00"), ErrAccountBlocked)
+		require.ErrorIs(t, ledger.Deposit(context.Background(), account.ID, "10.00"), ledgerapp.ErrAccountBlocked)
+		require.ErrorIs(t, ledger.Withdraw(context.Background(), account.ID, "10.00"), ledgerapp.ErrAccountBlocked)
 		assert.Equal(t, "0.0000", getAccountBalance(t, ledger, account.ID))
 	}
-	require.ErrorIs(t, ledger.Deposit(context.Background(), settlement.ID, "10.00"), ErrSystemAccount)
+	require.ErrorIs(t, ledger.Deposit(context.Background(), settlement.ID, "10.00"), ledgerapp.ErrSystemAccount)
 }
 
 func TestTransferRejectsBlockedDestinationWithoutChangingBalances(t *testing.T) {
@@ -160,8 +165,8 @@ func TestTransferRejectsBlockedDestinationWithoutChangingBalances(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, blocked.ID, "25.00"), ErrAccountBlocked)
-	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, settlement.ID, "25.00"), ErrSystemAccount)
+	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, blocked.ID, "25.00"), ledgerapp.ErrAccountBlocked)
+	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, settlement.ID, "25.00"), ledgerapp.ErrSystemAccount)
 	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, from.ID))
 	assert.Equal(t, "0.0000", getAccountBalance(t, ledger, blocked.ID))
 }
@@ -193,7 +198,7 @@ func TestTransferRequiresSameOwnerForBothAccounts(t *testing.T) {
 	foreignDestination := createAccount(other.ID, "Foreign destination")
 	require.NoError(t, ledger.Deposit(t.Context(), source.ID, "100.00"))
 
-	require.ErrorIs(t, ledger.Transfer(t.Context(), owner.ID, source.ID, foreignDestination.ID, "10.00"), ErrAccountOwnership)
+	require.ErrorIs(t, ledger.Transfer(t.Context(), owner.ID, source.ID, foreignDestination.ID, "10.00"), ledgerapp.ErrAccountOwnership)
 	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, source.ID))
 	assert.Equal(t, "0.0000", getAccountBalance(t, ledger, foreignDestination.ID))
 	require.NoError(t, ledger.Transfer(t.Context(), owner.ID, source.ID, ownedDestination.ID, "10.00"))

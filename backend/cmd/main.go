@@ -253,7 +253,7 @@ func main() {
 	}()
 
 	store := db.NewStore(dbConn)
-	ledgerSvc := ledger.NewService(store)
+	ledgerSvc := ledger.NewService(db.NewLedgerRepository(store))
 	eventHub := payment.NewEventHub()
 	paymentSvc := payment.NewService(store, eventHub)
 	seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)

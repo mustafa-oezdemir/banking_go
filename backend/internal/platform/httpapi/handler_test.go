@@ -44,7 +44,7 @@ func setupTestHandler(t *testing.T) *Handler {
 	}
 	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 	store := db.NewStore(sqlDB)
-	ledgerService := ledger.NewService(store)
+	ledgerService := ledger.NewService(db.NewLedgerRepository(store))
 	return NewHandler(ledgerService, store)
 }
 

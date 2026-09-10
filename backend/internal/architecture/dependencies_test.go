@@ -19,13 +19,14 @@ var allowedProjectImports = map[string]map[string]bool{
 	"notification": {},
 	"ledger": allowed(
 		"internal/account",
-		"internal/platform/database",
-		"postgres/sqlc",
+		"internal/ledger/domain",
 	),
 	"payment": allowed(
 		"internal/account",
 		"internal/ledger",
+		"internal/ledger/domain",
 		"internal/notification",
+		"internal/payment/domain",
 		"internal/platform/database",
 		"postgres/sqlc",
 	),
@@ -37,7 +38,13 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/platform/database",
 		"postgres/sqlc",
 	),
-	"platform/database": allowed("postgres/sqlc"),
+	"platform/database": allowed(
+		"internal/account",
+		"internal/identity",
+		"internal/ledger",
+		"internal/ledger/domain",
+		"postgres/sqlc",
+	),
 	"platform/email": allowed(
 		"internal/account",
 		"internal/notification",
@@ -108,6 +115,49 @@ func TestInternalPackageRootsAreIntentional(t *testing.T) {
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
 		"bootstrap": true, "database": true, "email": true, "httpapi": true,
 	})
+}
+
+func TestCoreDomainPackagesAreInfrastructureFree(t *testing.T) {
+	domainRules := map[string]map[string]bool{
+		"account":        {},
+		"identity":       {},
+		"ledger/domain":  allowed("internal/account"),
+		"payment/domain": {},
+	}
+	for domainPath, allowedImports := range domainRules {
+		root := filepath.Join("..", filepath.FromSlash(domainPath))
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatalf("read domain package %s: %v", domainPath, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			path := filepath.Join(root, entry.Name())
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+			if parseErr != nil {
+				t.Fatalf("parse domain file %s: %v", path, parseErr)
+			}
+			for _, imported := range parsed.Imports {
+				importPath, unquoteErr := strconv.Unquote(imported.Path.Value)
+				if unquoteErr != nil {
+					t.Fatalf("read import in %s: %v", path, unquoteErr)
+				}
+				if strings.HasPrefix(importPath, modulePath) {
+					target := strings.TrimPrefix(importPath, modulePath)
+					if !allowedImports[target] {
+						t.Errorf("domain %s imports forbidden project package %q", domainPath, target)
+					}
+				}
+				for _, forbidden := range []string{"database/sql", "net/http", "os", "github.com/go-chi/", "github.com/lib/pq", "github.com/resend/"} {
+					if importPath == forbidden || strings.HasPrefix(importPath, forbidden) {
+						t.Errorf("domain %s imports infrastructure %q", domainPath, importPath)
+					}
+				}
+			}
+		}
+	}
 }
 
 func assertOnlyDirectories(t *testing.T, root string, allowedDirectories map[string]bool) {

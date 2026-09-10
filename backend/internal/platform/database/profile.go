@@ -2,49 +2,19 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
-
-// CustomerProfile contains customer-maintained personal and address data.
-// Email is intentionally read-only in this flow because changing it requires
-// a separate verified security process.
-type CustomerProfile struct {
-	UpdatedAt    time.Time
-	Email        string
-	FullName     string
-	Phone        string
-	BirthDate    string
-	AddressLine1 string
-	AddressLine2 string
-	PostalCode   string
-	City         string
-	CountryCode  string
-	ID           uuid.UUID
-}
-
-// UpdateCustomerProfileParams contains validated profile fields.
-type UpdateCustomerProfileParams struct {
-	BirthDate    time.Time
-	FullName     string
-	Phone        string
-	AddressLine1 string
-	AddressLine2 string
-	PostalCode   string
-	City         string
-	CountryCode  string
-	UserID       uuid.UUID
-}
 
 const customerProfileColumns = `
 	id, email, full_name, phone, COALESCE(birth_date::TEXT, ''),
 	address_line1, address_line2, postal_code, city, country_code, updated_at`
 
-func scanCustomerProfile(row interface{ Scan(...any) error }) (CustomerProfile, error) {
-	var profile CustomerProfile
+func scanCustomerProfile(row interface{ Scan(...any) error }) (account.Profile, error) {
+	var profile account.Profile
 	err := row.Scan(
 		&profile.ID, &profile.Email, &profile.FullName, &profile.Phone, &profile.BirthDate,
 		&profile.AddressLine1, &profile.AddressLine2, &profile.PostalCode, &profile.City,
@@ -54,15 +24,15 @@ func scanCustomerProfile(row interface{ Scan(...any) error }) (CustomerProfile, 
 }
 
 // GetCustomerProfile returns only the authenticated user's profile.
-func (store *Store) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (CustomerProfile, error) {
+func (store *Store) GetCustomerProfile(ctx context.Context, userID uuid.UUID) (account.Profile, error) {
 	return scanCustomerProfile(store.db.QueryRowContext(ctx, `SELECT `+customerProfileColumns+` FROM users WHERE id = $1`, userID))
 }
 
 // UpdateCustomerProfile atomically updates the profile and records a
 // non-sensitive audit marker. Personal values are deliberately excluded from
 // event_data to avoid duplicating PII in the audit stream.
-func (store *Store) UpdateCustomerProfile(ctx context.Context, input UpdateCustomerProfileParams) (CustomerProfile, error) {
-	var profile CustomerProfile
+func (store *Store) UpdateCustomerProfile(ctx context.Context, input account.ProfileUpdate) (account.Profile, error) {
+	var profile account.Profile
 	err := store.ExecTxWithHandle(ctx, func(_ *sqlc.Queries, executor sqlc.DBTX) error {
 		var updateErr error
 		profile, updateErr = scanCustomerProfile(executor.QueryRowContext(ctx, `

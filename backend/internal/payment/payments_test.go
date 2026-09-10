@@ -115,14 +115,14 @@ func TestValidatePaymentInputMoneyRules(t *testing.T) {
 		TransferType: PaymentStandard, ScheduleType: ScheduleImmediate,
 		IdempotencyKey: "test-key-123", RequestedExecution: time.Now(),
 	}
-	amount, err := validatePaymentInput(base)
+	amount, err := validatePaymentInput(base, time.Now())
 	require.NoError(t, err)
 	assert.True(t, amount.Equal(decimal.RequireFromString("12.34")))
 
 	for _, invalid := range []string{"0", "-1", "1.001", "NaN", ""} {
 		input := base
 		input.Amount = invalid
-		_, err = validatePaymentInput(input)
+		_, err = validatePaymentInput(input, time.Now())
 		assert.Error(t, err, invalid)
 	}
 }

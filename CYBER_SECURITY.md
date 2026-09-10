@@ -48,7 +48,7 @@ flowchart LR
 | Parola güvenliği | ✅ Uygulandı | `backend/internal/identity/credentials.go`, `password_reset_handler.go` |
 | CSRF ve CORS | ✅ Uygulandı | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts` |
 | BOLA/IDOR yetkilendirmesi | ✅ Uygulandı | API handler'ları, owner filtreli SQL sorguları, servis sahiplik kontrolleri |
-| Finansal bütünlük | ✅ Güçlü demo kontrolü | `ledger.go`, `payments.go`, `store.go`, migration `000011` |
+| Finansal bütünlük | ✅ Güçlü demo kontrolü | `internal/ledger/domain/posting.go`, `internal/platform/database/ledger_repository.go`, `internal/payment/payments.go`, migration `000011` |
 | Rate limiting | 🟡 Tek instance | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go` |
 | Audit kayıtları | ✅ Uygulandı | `backend/internal/platform/database/admin.go`, migration `000007` |
 | Container güvenliği | ✅ Temel hardening | Backend/frontend `Dockerfile`, Compose healthcheck'leri |
@@ -144,13 +144,13 @@ flowchart LR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| Hesap sahipliği | `backend/internal/platform/httpapi/handler.go`, `backend/internal/ledger/ledger.go` | Kaynak ve hedef hesap sahipliği backend'de doğrulanır. Legacy `/transfers` yalnız aynı müşterinin hesapları arasında çalışır. |
+| Hesap sahipliği | `backend/internal/account/ownership.go`, `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/httpapi/handler.go` | Kaynak ve hedef hesap sahipliği backend'de ve saf domain politikasında doğrulanır. Legacy `/transfers` yalnız aynı müşterinin hesapları arasında çalışır. |
 | Ödeme sahipliği | `backend/internal/payment/payments.go`, `backend/postgres/queries/payments.sql` | Payment get/list/confirm/cancel işlemleri `owner_id` ile sınırlandırılır. |
 | Beneficiary sahipliği | `backend/postgres/queries/payments.sql` | Listeleme, getirme ve silme owner-scoped sorgular kullanır. |
 | Standing order sahipliği | `backend/postgres/queries/standing_orders.sql` | Update/cancel/list sorguları `owner_id` ile filtrelenir. |
 | İşlem geçmişi | `backend/internal/platform/httpapi/handler.go`, `payments_handler.go` | Hesaba erişmeden önce authenticated user ile owner kontrolü yapılır. |
 | Admin rolü | `backend/internal/platform/httpapi/admin_handler.go` | Token claim'ine kör güvenmek yerine kullanıcının güncel rolü veritabanından okunur. Self-demotion engellenir. |
-| Sistem hesabı koruması | `ledger.go`, `payments.go` | Customer akışlarının settlement/system hesaplarını doğrudan kullanması engellenir. |
+| Sistem hesabı koruması | `backend/internal/ledger/domain/posting.go`, `backend/internal/payment/payments.go` | Customer akışlarının settlement/system hesaplarını doğrudan kullanması engellenir. |
 
 Frontend route guard güvenlik sınırı değildir. `frontend/proxy.ts` kullanıcı deneyimi için cookie varlığını kontrol eder; gerçek yetkilendirme daima Go API ve PostgreSQL sorgularında yapılır.
 
@@ -159,15 +159,15 @@ Frontend route guard güvenlik sınırı değildir. `frontend/proxy.ts` kullanı
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
 | Exact decimal | `backend/internal/ledger/money.go` | Float yerine `decimal` kullanılır; EUR tutarı pozitif, en fazla iki ondalık ve üst sınır içinde olmalıdır. |
-| Atomic double-entry | `backend/internal/ledger/ledger.go`, `payments.go` | Debit, credit ve cached balance güncellemesi tek transaction içinde yapılır. Hata halinde rollback olur. |
+| Atomic double-entry | `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go` | Dengeli debit/credit planı domain katmanında doğrulanır; girişler ve cached balance tek serializable transaction içinde yazılır. Hata halinde rollback olur. |
 | Serializable isolation | `backend/internal/platform/database/store.go` | Finansal transaction'lar `sql.LevelSerializable` kullanır; serialization conflict kontrollü backoff ile tekrar denenir. |
-| Stabil row locking | `ledger.go`, `payments.go`, `accounts.sql` | Hesaplar UUID sırasıyla `FOR UPDATE` kilitlenir; eşzamanlı double-spend/deadlock riski azaltılır. |
-| İdempotency | `payments_handler.go`, `payments.go`, migration `000005` | `Idempotency-Key` zorunludur; owner+key unique constraint ve aynı intent karşılaştırması vardır. |
-| Ödeme state machine | `payments.sql`, `payments.go` | Yalnız izin verilen durum geçişleri SQL WHERE koşullarıyla uygulanır. |
+| Stabil row locking | `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go`, `backend/postgres/queries/accounts.sql` | Hesaplar UUID sırasıyla `FOR UPDATE` kilitlenir; eşzamanlı double-spend/deadlock riski azaltılır. |
+| İdempotency | `backend/internal/payment/domain/intent.go`, `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/payments.go`, migration `000005` | `Idempotency-Key` zorunludur; owner+key unique constraint ve aynı intent karşılaştırması vardır. |
+| Ödeme state machine | `backend/internal/payment/domain/lifecycle.go`, `backend/postgres/queries/payments.sql`, `backend/internal/payment/payments.go` | Domain katmanı izin verilen geçişi doğrular; SQL WHERE koşulları eşzamanlı state değişimini korur. |
 | Worker tekilleştirme | `payments.sql`, `standing_orders.sql` | Due işler `FOR UPDATE SKIP LOCKED` ile claim edilir; birden fazla worker'ın aynı işi alması engellenir. |
 | VoP ve açık onay | `vop.go`, `payments.go`, `payments_handler.go` | Ödeme önce VoP sonucuna, sonra açık kullanıcı onayına gider; mismatch override backend tarafından kaydedilir. |
 | Append-only ledger | migration `000011_make_ledger_entries_append_only.up.sql` | `entries` üzerinde UPDATE ve DELETE trigger ile engellenir; düzeltmeler ters/compensating entry olarak yapılmalıdır. |
-| Reconciliation | `ledger.go`, `accounts.sql` | Cached bakiye, `SUM(credit)-SUM(debit)` ile karşılaştırılabilir. |
+| Reconciliation | `backend/internal/platform/database/ledger_repository.go`, `backend/postgres/queries/accounts.sql` | Cached bakiye, `SUM(credit)-SUM(debit)` ile karşılaştırılabilir. |
 
 ## 8. Audit, log ve gizlilik
 
@@ -299,8 +299,8 @@ yarn build
 | Login/parola/MFA | `credentials.go`, `handler.go`, `password_reset_handler.go` |
 | XSS/CSP/header | `frontend/proxy.ts`, `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` |
 | SQL ve owner filtresi | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go` |
-| Para transferi | `backend/internal/ledger/ledger.go`, `payments.go`, `money.go` |
-| Ödeme state/idempotency | `payments.go`, `payments.sql`, migration `000005` |
+| Para transferi | `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go`, `backend/internal/ledger/money.go` |
+| Ödeme state/idempotency | `backend/internal/payment/domain/lifecycle.go`, `backend/internal/payment/domain/intent.go`, `backend/internal/payment/payments.go`, `backend/postgres/queries/payments.sql`, migration `000005` |
 | Scheduler/worker | `payment_worker.go`, `standing_orders.go`, ilgili SQL sorguları |
 | Admin ve audit | `admin_handler.go`, `db/admin.go`, migration `000007` |
 | Müşteri profili/adres | `profile_handler.go`, `db/profile.go`, migration `000012`, frontend `BankingApp.tsx` |

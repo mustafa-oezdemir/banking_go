@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Phase 1 completed; Phase 2 awaits explicit start
+Status: Architecture Phase 2 completed; Phase 3 awaits explicit start
 
 Last updated: 2026-09-10
 
@@ -16,7 +16,7 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 | --- | --- | --- |
 | 0. Baseline analysis | Completed: current/target architecture, risks, invariants, and migration decision documented | None |
 | 1. Establish domain boundaries | Completed: explicit Identity, Customer/Account, Payment, Ledger, Notification, and Platform modules with an import fitness test | None |
-| 2. Modularize banking backend | HTTP and PostgreSQL become adapters around module application interfaces | None |
+| 2. Modularize banking backend | Completed: critical domain rules are pure; Ledger, Profile, and Authentication use application ports; payment ACID exception is documented | None |
 | 3. Extract notification service | Notification owns delivery and its private persistence | One new optional service |
 | 4. Introduce async notification events | Durable outbox, broker, inbox/deduplication, retries | Broker only if justified |
 | 5. Extract identity service | Credentials and sessions move behind an Identity contract and private database | One new service |
@@ -73,21 +73,22 @@ Exit criteria:
 
 Goal: complete the ports-and-adapters separation needed for safe extraction.
 
-Planned work:
+Completion: implemented on 2026-09-10. ADR-003 records the deliberately incremental boundary and the payment unit-of-work exception.
 
-- replace concrete `*db.Store` dependencies in application services with narrow module-owned repository ports;
-- map sqlc rows to domain/application types at PostgreSQL adapter boundaries;
-- reduce `cmd/main.go` to composition and lifecycle management;
-- move account, beneficiary, profile, and identity orchestration out of handlers;
-- define a Banking Core unit-of-work abstraction that preserves existing serializable transactions;
-- make clocks and ID generation injectable where determinism matters;
-- add repository integration and application-level fake tests;
-- decide and document how lifecycle state plus audit/outbox writes become atomic.
+Delivered:
+
+- pure posting, lifecycle, payment-intent, ownership, and profile rules with infrastructure-free tests;
+- a module-owned Ledger repository port with PostgreSQL transaction implementation in `platform/database`;
+- Profile and Authentication application services with narrow repository ports;
+- sqlc-to-application mappings at the PostgreSQL boundary;
+- injected clocks for payment validation and profile updates where determinism matters;
+- architecture tests that prohibit infrastructure dependencies in core packages;
+- a documented payment unit-of-work exception that preserves serializable booking atomicity.
 
 Exit criteria:
 
 - domain packages do not import HTTP, Chi, sqlc, PostgreSQL, SMTP/Resend, or process environment packages;
-- HTTP and PostgreSQL are replaceable adapters;
+- HTTP and PostgreSQL are adapters at the extracted use-case boundaries;
 - no topology or data ownership change yet.
 
 ## Phase 3 — Extract notification service
@@ -217,7 +218,7 @@ The following gates apply to every phase:
 | --- | --- | --- |
 | ADR-001 | 0 | Evolutionary migration instead of big-bang rewrite |
 | ADR-002 | 1 | Domain ownership and dependency boundaries |
-| ADR-003 | 2 or 3 | Application ports and Banking Core unit of work |
+| ADR-003 | 2 | Domain/application separation, ports, and the retained payment unit of work |
 | ADR-004 | 3 | Notification extraction and data contract |
 | ADR-005 | 4 | Outbox, broker choice, delivery semantics, and deduplication |
 | ADR-006 | 5 | Identity data split, token authority, and migration |

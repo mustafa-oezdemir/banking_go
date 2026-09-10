@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -37,7 +38,7 @@ func TestUpdateCustomerProfilePersistsAndAudits(t *testing.T) {
 		require.NoError(t, cleanupErr)
 	})
 
-	updated, err := store.UpdateCustomerProfile(t.Context(), UpdateCustomerProfileParams{
+	updated, err := store.UpdateCustomerProfile(t.Context(), account.ProfileUpdate{
 		UserID: user.ID, FullName: "Anna Beispiel", Phone: "+49 170 1234567",
 		BirthDate: time.Date(1990, 5, 12, 0, 0, 0, 0, time.UTC), AddressLine1: "Musterstraße 12",
 		AddressLine2: "Wohnung 4", PostalCode: "10115", City: "Berlin", CountryCode: "DE",

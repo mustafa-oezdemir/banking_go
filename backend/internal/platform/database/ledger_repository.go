@@ -1,5 +1,4 @@
-// Package ledger contains the core double-entry bookkeeping behavior.
-package ledger
+package db
 
 import (
 	"context"
@@ -11,93 +10,66 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
-	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
-	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	ledgerdomain "github.com/mustafa-oezdemir/banking_go/internal/ledger/domain"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
-const signupOpeningBalance = "500.00"
-
-var (
-	// ErrInsufficientFunds is returned when an account balance cannot cover a debit.
-	ErrInsufficientFunds = errors.New("insufficient funds")
-	// ErrSameAccountTransfer is returned when a transfer uses the same source and destination account.
-	ErrSameAccountTransfer = errors.New("cannot transfer to the same account")
-	// ErrInvalidAmount is returned when an amount is non-positive, over-precise, or out of range.
-	ErrInvalidAmount = errors.New("amount must be positive, use at most two decimals, and fit the supported range")
-	// ErrCurrencyMismatch is returned when accounts involved in an operation use different currencies.
-	ErrCurrencyMismatch = errors.New("currency mismatch")
-	// ErrAccountNotFound is returned when an expected account does not exist.
-	ErrAccountNotFound = errors.New("account not found")
-	// ErrSystemAccount is returned when a customer operation targets an internal ledger account.
-	ErrSystemAccount = errors.New("system accounts cannot be used for customer operations")
-	// ErrAccountOwnership is returned when a customer operation targets an account they do not own.
-	ErrAccountOwnership = errors.New("account ownership check failed")
-	// ErrAccountBlocked is returned when a financial operation targets an inactive account.
-	ErrAccountBlocked = errors.New("account is not active")
-)
-
-// Service coordinates double-entry operations on accounts.
-type Service struct {
-	store *db.Store
+// LedgerRepository implements the ledger persistence port with PostgreSQL/sqlc.
+type LedgerRepository struct {
+	store *Store
 }
 
-// FundedCustomer contains the user and default account created during registration.
-type FundedCustomer struct {
-	Account sqlc.Account
-	User    sqlc.CreateUserRow
-}
-
-// NewService constructs a Service backed by the provided store.
-func NewService(store *db.Store) *Service {
-	return &Service{store: store}
+// NewLedgerRepository constructs the PostgreSQL ledger adapter.
+func NewLedgerRepository(store *Store) *LedgerRepository {
+	return &LedgerRepository{store: store}
 }
 
 // CreateFundedCustomer atomically creates a customer, their default EUR account,
 // and the balanced signup credit. A failed account or ledger write rolls back the user too.
-func (s *Service) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (FundedCustomer, error) {
-	iban, err := sepa.GenerateGermanDemoIBAN()
-	if err != nil {
-		return FundedCustomer{}, fmt.Errorf("generate signup account IBAN: %w", err)
-	}
-	openingBalance := decimal.RequireFromString(signupOpeningBalance)
-	var customer FundedCustomer
-	err = s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
+func (s *LedgerRepository) CreateFundedCustomer(
+	ctx context.Context,
+	input ledger.NewCustomer,
+	iban string,
+	openingBalance decimal.Decimal,
+) (ledger.FundedCustomer, error) {
+	var user sqlc.CreateUserRow
+	var customerAccount sqlc.Account
+	err := s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		var txErr error
-		customer.User, txErr = q.CreateUser(ctx, input)
+		user, txErr = q.CreateUser(ctx, sqlc.CreateUserParams{
+			Email: input.Email, HashedPassword: input.HashedPassword, FullName: input.FullName,
+		})
 		if txErr != nil {
 			return txErr
 		}
-		customer.Account, txErr = q.CreateAccount(ctx, sqlc.CreateAccountParams{
-			OwnerID: uuid.NullUUID{UUID: customer.User.ID, Valid: true},
+		customerAccount, txErr = q.CreateAccount(ctx, sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: user.ID, Valid: true},
 			Name:    "Girokonto", Currency: "EUR", IsSystem: false,
 			Iban: iban, AccountType: "GIROKONTO", Status: "ACTIVE",
 		})
 		if txErr != nil {
 			return txErr
 		}
-		return s.depositTx(ctx, q, customer.Account.ID, openingBalance)
+		return s.depositTx(ctx, q, customerAccount.ID, openingBalance)
 	})
 	if err != nil {
-		return FundedCustomer{}, err
+		return ledger.FundedCustomer{}, err
 	}
-	return customer, nil
+	return ledger.FundedCustomer{
+		User:    ledger.Customer{ID: user.ID, Email: user.Email},
+		Account: ledger.Account{ID: customerAccount.ID, IBAN: customerAccount.Iban},
+	}, nil
 }
 
 // Deposit external money into user account
-func (s *Service) Deposit(ctx context.Context, accountID uuid.UUID, amountStr string) error {
-	// Step 1: Validate amount once at service boundary.
-	amount, err := validatePositiveAmount(amountStr)
-	if err != nil {
-		return err
-	}
-
+func (s *LedgerRepository) Deposit(ctx context.Context, accountID uuid.UUID, amount decimal.Decimal) error {
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		return s.depositTx(ctx, q, accountID, amount)
 	})
 }
 
-func (s *Service) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+func (s *LedgerRepository) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
 	// Step 2: Lock settlement + target account rows for this transaction.
 	settlement, err := q.GetSettlementAccountForUpdate(ctx)
 	if err != nil {
@@ -109,14 +81,14 @@ func (s *Service) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid
 		return fmt.Errorf("account not found: %w", err)
 	}
 	if account.IsSystem {
-		return ErrSystemAccount
+		return ledger.ErrSystemAccount
 	}
 	if account.Status != "ACTIVE" {
-		return ErrAccountBlocked
+		return ledger.ErrAccountBlocked
 	}
 
 	if account.Currency != settlement.Currency {
-		return ErrCurrencyMismatch
+		return ledger.ErrCurrencyMismatch
 	}
 
 	// Step 3: Use one transaction ID to tie both ledger legs together.
@@ -171,19 +143,13 @@ func (s *Service) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid
 }
 
 // Withdraw external money from user account
-func (s *Service) Withdraw(ctx context.Context, accountID uuid.UUID, amountStr string) error {
-	// Step 1: Validate amount before opening expensive DB work.
-	amount, err := validatePositiveAmount(amountStr)
-	if err != nil {
-		return err
-	}
-
+func (s *LedgerRepository) Withdraw(ctx context.Context, accountID uuid.UUID, amount decimal.Decimal) error {
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		return s.withdrawTx(ctx, q, accountID, amount)
 	})
 }
 
-func (s *Service) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+func (s *LedgerRepository) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
 	// Step 2: Lock settlement + user account to prevent concurrent balance races.
 	settlement, err := q.GetSettlementAccountForUpdate(ctx)
 	if err != nil {
@@ -195,14 +161,14 @@ func (s *Service) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uui
 		return fmt.Errorf("account not found: %w", err)
 	}
 	if account.IsSystem {
-		return ErrSystemAccount
+		return ledger.ErrSystemAccount
 	}
 	if account.Status != "ACTIVE" {
-		return ErrAccountBlocked
+		return ledger.ErrAccountBlocked
 	}
 
 	if account.Currency != settlement.Currency {
-		return ErrCurrencyMismatch
+		return ledger.ErrCurrencyMismatch
 	}
 
 	balanceDec, err := decimal.NewFromString(account.Balance)
@@ -212,7 +178,7 @@ func (s *Service) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uui
 
 	if balanceDec.LessThan(amount) {
 		// Business invariant: withdrawals cannot overdraw user funds.
-		return ErrInsufficientFunds
+		return ledger.ErrInsufficientFunds
 	}
 
 	txID := uuid.New()
@@ -266,19 +232,13 @@ func (s *Service) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uui
 }
 
 // AdjustBalanceAsAdmin performs the ledger mutation and actor-aware audit insert atomically.
-func (s *Service) AdjustBalanceAsAdmin(
+func (s *LedgerRepository) AdjustBalanceAsAdmin(
 	ctx context.Context,
 	actorID, accountID uuid.UUID,
-	operation, amountStr, requestID string,
+	operation string,
+	amount decimal.Decimal,
+	requestID string,
 ) error {
-	amount, err := validatePositiveAmount(amountStr)
-	if err != nil {
-		return err
-	}
-	if operation != "DEPOSIT" && operation != "WITHDRAW" {
-		return errors.New("unsupported balance operation")
-	}
-
 	return s.store.ExecTxWithHandle(ctx, func(q *sqlc.Queries, executor sqlc.DBTX) error {
 		before, txErr := q.GetAccount(ctx, accountID)
 		if txErr != nil {
@@ -296,7 +256,7 @@ func (s *Service) AdjustBalanceAsAdmin(
 		if txErr != nil {
 			return txErr
 		}
-		return db.RecordAdminAuditTx(ctx, executor, actorID, nil, &accountID,
+		return RecordAdminAuditTx(ctx, executor, actorID, nil, &accountID,
 			"ACCOUNT_BALANCE_"+operation, before.Balance, after.Balance, requestID)
 	})
 }
@@ -305,20 +265,7 @@ func (s *Service) AdjustBalanceAsAdmin(
 // customer. Transfers to another customer must use payment.Service so VoP,
 // explicit confirmation, idempotency, and the payment state machine cannot be
 // bypassed through this legacy endpoint.
-func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID, amountStr string) error {
-	// Step 1: Validate amount and reject self-transfers immediately.
-	if ownerID == uuid.Nil {
-		return ErrAccountOwnership
-	}
-	amount, err := validatePositiveAmount(amountStr)
-	if err != nil {
-		return err
-	}
-
-	if fromID == toID {
-		return ErrSameAccountTransfer
-	}
-
+func (s *LedgerRepository) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID, amount decimal.Decimal) error {
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		// Step 2: Lock both accounts in deterministic UUID order. This avoids
 		// deadlocks when two concurrent transfers move money in opposite directions.
@@ -327,7 +274,7 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 			return err
 		}
 		if len(accounts) != 2 {
-			return ErrAccountNotFound
+			return ledger.ErrAccountNotFound
 		}
 		accountByID := map[uuid.UUID]sqlc.Account{
 			accounts[0].ID: accounts[0],
@@ -335,29 +282,25 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 		}
 		fromAcc := accountByID[fromID]
 		toAcc := accountByID[toID]
-		if fromAcc.IsSystem || toAcc.IsSystem {
-			return ErrSystemAccount
-		}
-		if !fromAcc.OwnerID.Valid || fromAcc.OwnerID.UUID != ownerID ||
-			!toAcc.OwnerID.Valid || toAcc.OwnerID.UUID != ownerID {
-			return ErrAccountOwnership
-		}
-		if fromAcc.Status != "ACTIVE" || toAcc.Status != "ACTIVE" {
-			return ErrAccountBlocked
-		}
-
-		if fromAcc.Currency != toAcc.Currency {
-			return ErrCurrencyMismatch
-		}
-
 		fromBalance, err := decimal.NewFromString(fromAcc.Balance)
 		if err != nil {
 			return errors.New("invalid from balance")
 		}
-
-		if fromBalance.LessThan(amount) {
-			// Sender must have enough balance to cover transfer amount.
-			return ErrInsufficientFunds
+		posting, err := ledgerdomain.PlanCustomerTransfer(
+			ownerID,
+			ledgerdomain.AccountSnapshot{
+				ID: fromAcc.ID, OwnerID: fromAcc.OwnerID.UUID, OwnerAssigned: fromAcc.OwnerID.Valid,
+				Currency: fromAcc.Currency, Status: fromAcc.Status, AvailableBalance: fromBalance, System: fromAcc.IsSystem,
+			},
+			ledgerdomain.AccountSnapshot{
+				ID: toAcc.ID, OwnerID: toAcc.OwnerID.UUID, OwnerAssigned: toAcc.OwnerID.Valid,
+				Currency: toAcc.Currency, Status: toAcc.Status, System: toAcc.IsSystem,
+			},
+			amount,
+			ledgerdomain.TransferPolicy{RequireDestinationOwnership: true},
+		)
+		if err != nil {
+			return err
 		}
 
 		// Step 3: Single transaction ID links debit and credit entries.
@@ -365,9 +308,9 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 
 		// 1. Debit from
 		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     fromID,
-			Debit:         amount.StringFixed(4),
-			Credit:        decimal.Zero.StringFixed(4),
+			AccountID:     posting.DebitLeg.AccountID,
+			Debit:         posting.DebitLeg.Debit.StringFixed(4),
+			Credit:        posting.DebitLeg.Credit.StringFixed(4),
 			TransactionID: txID,
 			OperationType: "transfer",
 			Description:   sql.NullString{String: fmt.Sprintf("Transfer to %s", toID), Valid: true},
@@ -378,9 +321,9 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 
 		// 2. Credit to
 		_, err = q.CreateEntry(ctx, sqlc.CreateEntryParams{
-			AccountID:     toID,
-			Debit:         decimal.Zero.StringFixed(4),
-			Credit:        amount.StringFixed(4),
+			AccountID:     posting.CreditLeg.AccountID,
+			Debit:         posting.CreditLeg.Debit.StringFixed(4),
+			Credit:        posting.CreditLeg.Credit.StringFixed(4),
 			TransactionID: txID,
 			OperationType: "transfer",
 			Description:   sql.NullString{String: fmt.Sprintf("Transfer from %s", fromID), Valid: true},
@@ -391,16 +334,16 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 
 		// 3. Update cached balances for both sides of the transfer.
 		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.Neg().StringFixed(4),
-			ID:      fromID,
+			Balance: posting.DebitLeg.Debit.Neg().StringFixed(4),
+			ID:      posting.DebitLeg.AccountID,
 		})
 		if err != nil {
 			return err
 		}
 
 		err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
-			Balance: amount.StringFixed(4),
-			ID:      toID,
+			Balance: posting.CreditLeg.Credit.StringFixed(4),
+			ID:      posting.CreditLeg.AccountID,
 		})
 		if err != nil {
 			return err
@@ -413,7 +356,7 @@ func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID,
 }
 
 // ReconcileAccount verifies stored balance == SUM(credits) - SUM(debits)
-func (s *Service) ReconcileAccount(ctx context.Context, accountID uuid.UUID) (bool, error) {
+func (s *LedgerRepository) ReconcileAccount(ctx context.Context, accountID uuid.UUID) (bool, error) {
 	// Step 1: Read stored balance snapshot from accounts table.
 	account, err := s.store.GetAccount(ctx, accountID)
 	if err != nil {
@@ -446,10 +389,4 @@ func (s *Service) ReconcileAccount(ctx context.Context, accountID uuid.UUID) (bo
 	log.Info().Msg("Account reconciled successfully")
 
 	return true, nil
-}
-
-// validatePositiveAmount retains the ledger-facing name while applying the
-// shared EUR amount policy used by all payment write paths.
-func validatePositiveAmount(amountStr string) (decimal.Decimal, error) {
-	return ParseEURAmount(amountStr)
 }

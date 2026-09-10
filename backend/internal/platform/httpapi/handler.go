@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
-	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
+	"github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/identity"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
@@ -25,14 +25,16 @@ import (
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger   *ledger.Service
-	payments *payment.Service
-	store    *db.Store
-	notifier notification.Sender
+	ledger        *ledger.Service
+	payments      *payment.Service
+	profiles      *account.ProfileService
+	authenticator *identity.AuthenticationService
+	store         *db.Store
+	notifier      notification.Sender
 }
 
 func validateAccountName(rawName string) (string, error) {
-	return sepa.ValidateName(rawName)
+	return account.ValidateName(rawName)
 }
 
 func authenticatedUserID(r *http.Request) (uuid.UUID, error) {
@@ -62,7 +64,8 @@ func parseQueryInt32(raw string) (int32, error) {
 // NewHandler constructs a Handler with the required service and persistence dependencies.
 func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 	return &Handler{
-		ledger: ledgerService, payments: payment.NewService(store, nil), store: store,
+		ledger: ledgerService, payments: payment.NewService(store, nil), profiles: account.NewProfileService(store),
+		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)), store: store,
 		notifier: notification.NoopSender{},
 	}
 }
@@ -70,7 +73,11 @@ func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 // NewHandlerWithPayments allows main and the standalone worker to share the
 // same payment service and in-memory SSE hub.
 func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payment.Service, store *db.Store) *Handler {
-	return &Handler{ledger: ledgerService, payments: paymentService, store: store, notifier: notification.NoopSender{}}
+	return &Handler{
+		ledger: ledgerService, payments: paymentService, profiles: account.NewProfileService(store),
+		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)),
+		store:         store, notifier: notification.NoopSender{},
+	}
 }
 
 // SetNotificationSender enables transactional security and account emails.
@@ -124,7 +131,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Atomically persist the user, their EUR account, and the balanced signup credit.
-	customer, err := h.ledger.CreateFundedCustomer(r.Context(), sqlc.CreateUserParams{
+	customer, err := h.ledger.CreateFundedCustomer(r.Context(), ledger.NewCustomer{
 		Email:          email,
 		HashedPassword: hashed,
 		FullName:       defaultFullName(input.FullName, email),
@@ -152,7 +159,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		UserID:     customer.User.ID.String(),
 		Email:      customer.User.Email,
 		AccountID:  customer.Account.ID.String(),
-		MaskedIBAN: sepa.MaskIBAN(customer.Account.Iban),
+		MaskedIBAN: account.MaskIBAN(customer.Account.IBAN),
 	})
 }
 
@@ -179,34 +186,20 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
-	email, validationErr := identity.NormalizeEmail(input.Email)
-	if validationErr != nil || input.Password == "" || len([]byte(input.Password)) > identity.MaxPasswordBytes {
+	authenticated, err := h.authenticator.Authenticate(r.Context(), input.Email, input.Password)
+	if errors.Is(err, identity.ErrInvalidCredentials) {
+		log.Warn().Msg("Login failed - invalid credentials")
 		respondError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-
-	// Step 2: Load user by email and compare bcrypt password hash.
-	user, err := h.store.GetUserByEmail(r.Context(), email)
 	if err != nil {
-		identity.VerifyDummyPassword(input.Password)
-		log.Warn().Err(err).Msg("Login failed - user not found")
-		respondError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	if !identity.VerifyPassword(user.HashedPassword, input.Password) {
-		log.Warn().Msg("Login failed - invalid password")
-		respondError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	// Step 3: Return a fresh JWT on successful authentication.
-	sessionVersion, err := h.store.GetUserSessionVersion(r.Context(), user.ID)
-	if err != nil {
+		log.Error().Err(err).Msg("Login failed - identity repository unavailable")
 		respondError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
-	token, err := GenerateTokenForVersion(user.ID, sessionVersion)
+
+	// Step 2: Return a fresh JWT on successful authentication.
+	token, err := GenerateTokenForVersion(authenticated.UserID, authenticated.SessionVersion)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to generate token")
 		respondError(w, http.StatusInternalServerError, "failed to generate token")
@@ -296,7 +289,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Create a user-owned account in default currency.
 	var acc sqlc.Account
 	for attempt := 0; attempt < 5; attempt++ {
-		iban, ibanErr := sepa.GenerateGermanDemoIBAN()
+		iban, ibanErr := account.GenerateGermanDemoIBAN()
 		if ibanErr != nil {
 			err = ibanErr
 			break

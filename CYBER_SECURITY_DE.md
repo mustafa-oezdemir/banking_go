@@ -48,7 +48,7 @@ flowchart LR
 | Passwortsicherheit               | ✅ Umgesetzt             | `backend/internal/identity/credentials.go`, `password_reset_handler.go`                                 |
 | CSRF und CORS                    | ✅ Umgesetzt             | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts`         |
 | BOLA-/IDOR-Autorisierung         | ✅ Umgesetzt             | API-Handler, Owner-gefilterte SQL-Abfragen und Service-Prüfungen                              |
-| Finanzielle Integrität          | ✅ Starke Demo-Kontrolle | `ledger.go`, `payments.go`, `store.go`, Migration `000011`                             |
+| Finanzielle Integrität          | ✅ Starke Demo-Kontrolle | `internal/ledger/domain/posting.go`, `internal/platform/database/ledger_repository.go`, `internal/payment/payments.go`, Migration `000011` |
 | Rate Limiting                    | 🟡 Pro Instanz           | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`                                  |
 | Audit-Protokolle                 | ✅ Umgesetzt             | `backend/internal/platform/database/admin.go`, Migration `000007`                                         |
 | Container-Sicherheit             | ✅ Basis-Hardening       | Backend-/Frontend-`Dockerfile`, Compose-Healthchecks                                         |
@@ -144,13 +144,13 @@ flowchart LR
 
 | Kontrolle              | Datei                                                                               | Beschreibung                                                                                                                      |
 | ---------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Konto-Ownership        | `backend/internal/platform/httpapi/handler.go`, `backend/internal/ledger/ledger.go`         | Eigentümer von Quell- und Zielkonto werden im Backend geprüft.`/transfers` funktioniert nur zwischen Konten desselben Kunden. |
+| Konto-Ownership        | `backend/internal/account/ownership.go`, `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/httpapi/handler.go` | Eigentümer von Quell- und Zielkonto werden im Backend und in einer reinen Domain-Regel geprüft. `/transfers` funktioniert nur zwischen Konten desselben Kunden. |
 | Payment-Ownership      | `backend/internal/payment/payments.go`, `backend/postgres/queries/payments.sql` | Lesen, Listen, Bestätigen und Abbrechen werden über`owner_id` begrenzt.                                                       |
 | Empfänger-Ownership   | `backend/postgres/queries/payments.sql`                                           | Listen-, Lookup- und Delete-Abfragen sind Owner-scoped.                                                                           |
 | Dauerauftrag-Ownership | `backend/postgres/queries/standing_orders.sql`                                    | Update, Cancel und List filtern nach`owner_id`.                                                                                 |
 | Transaktionshistorie   | API-Handler                                                                         | Vor dem Zugriff wird das Konto dem authentifizierten Benutzer zugeordnet.                                                         |
 | Admin-Rolle            | `backend/internal/platform/httpapi/admin_handler.go`                                           | Die aktuelle Rolle wird aus der Datenbank gelesen und nicht blind aus dem Token übernommen. Self-Demotion wird verhindert.       |
-| Systemkonten           | `ledger.go`, `payments.go`                                                      | Kundenflüsse dürfen Settlement-/Systemkonten nicht direkt verwenden.                                                            |
+| Systemkonten           | `backend/internal/ledger/domain/posting.go`, `backend/internal/payment/payments.go` | Kundenflüsse dürfen Settlement-/Systemkonten nicht direkt verwenden. |
 
 Der Frontend Route Guard ist keine Sicherheitsgrenze. `frontend/proxy.ts` verbessert nur die Benutzerführung; die tatsächliche Autorisierung findet immer in Go-API und PostgreSQL-Queries statt.
 
@@ -159,15 +159,15 @@ Der Frontend Route Guard ist keine Sicherheitsgrenze. `frontend/proxy.ts` verbes
 | Kontrolle                  | Datei                                                          | Beschreibung                                                                                                                                   |
 | -------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Exakte Dezimalbeträge     | `backend/internal/ledger/money.go`                          | Verwendet Decimal statt Float; EUR-Beträge müssen positiv sein, höchstens zwei Nachkommastellen haben und im unterstützten Bereich liegen. |
-| Atomares Double Entry      | `ledger.go`, `payments.go`                                 | Debit, Credit und Cache-Balance werden in einer DB-Transaktion aktualisiert; Fehler führen zum Rollback.                                      |
+| Atomares Double Entry      | `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go` | Die Domain validiert ausgeglichene Debit-/Credit-Buchungen; Einträge und Cache-Balances werden in einer serialisierbaren Transaktion geschrieben. |
 | Serializable Isolation     | `backend/internal/platform/database/store.go`                               | Finanzielle Transaktionen verwenden`sql.LevelSerializable`; Serialization Conflicts werden mit Backoff wiederholt.                           |
-| Stabile Row Locks          | `ledger.go`, `payments.go`, `accounts.sql`               | Konten werden in UUID-Reihenfolge mit`FOR UPDATE` gesperrt, um Double Spend und Deadlocks zu reduzieren.                                     |
-| Idempotency                | `payments_handler.go`, `payments.go`, Migration `000005` | `Idempotency-Key` ist verpflichtend; Owner+Key ist eindeutig und derselbe Intent wird verglichen.                                            |
-| Payment State Machine      | `payments.sql`, `payments.go`                              | Nur erlaubte Statusübergänge werden über SQL-WHERE-Bedingungen ausgeführt.                                                                 |
+| Stabile Row Locks          | `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go`, `backend/postgres/queries/accounts.sql` | Konten werden in UUID-Reihenfolge mit `FOR UPDATE` gesperrt, um Double Spend und Deadlocks zu reduzieren. |
+| Idempotency                | `backend/internal/payment/domain/intent.go`, `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/payments.go`, Migration `000005` | `Idempotency-Key` ist verpflichtend; Owner+Key ist eindeutig und derselbe Intent wird verglichen. |
+| Payment State Machine      | `backend/internal/payment/domain/lifecycle.go`, `backend/postgres/queries/payments.sql`, `backend/internal/payment/payments.go` | Die Domain validiert erlaubte Übergänge; SQL-WHERE-Bedingungen schützen konkurrierende Statusänderungen. |
 | Worker-Eindeutigkeit       | `payments.sql`, `standing_orders.sql`                      | Fällige Jobs werden mit`FOR UPDATE SKIP LOCKED` beansprucht.                                                                                |
 | VoP und explizite Freigabe | `vop.go`, `payments.go`, `payments_handler.go`           | Payment durchläuft Empfängerprüfung und explizite Demo-Bestätigung; ein Mismatch-Override wird serverseitig gespeichert.                   |
 | Append-only Ledger         | Migration`000011_make_ledger_entries_append_only.up.sql`     | UPDATE und DELETE auf`entries` werden per Trigger blockiert; Korrekturen müssen als Gegenbuchung erfolgen.                                  |
-| Reconciliation             | `ledger.go`, `accounts.sql`                                | Die gespeicherte Balance kann mit`SUM(credit)-SUM(debit)` verglichen werden.                                                                 |
+| Reconciliation             | `backend/internal/platform/database/ledger_repository.go`, `backend/postgres/queries/accounts.sql` | Die gespeicherte Balance kann mit `SUM(credit)-SUM(debit)` verglichen werden. |
 
 ## 8. Audit, Logging und Datenschutz
 
@@ -298,8 +298,8 @@ yarn build
 | Login/Passwort/MFA        | `credentials.go`, `handler.go`, `password_reset_handler.go`                            |
 | XSS/CSP/Header            | `frontend/proxy.ts`, `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go`     |
 | SQL und Owner-Filter      | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go`                             |
-| Geldtransfer              | `backend/internal/ledger/ledger.go`, `payments.go`, `money.go`                        |
-| Payment State/Idempotency | `payments.go`, `payments.sql`, Migration `000005`                                      |
+| Geldtransfer              | `backend/internal/ledger/domain/posting.go`, `backend/internal/platform/database/ledger_repository.go`, `backend/internal/payment/payments.go`, `backend/internal/ledger/money.go` |
+| Payment State/Idempotency | `backend/internal/payment/domain/lifecycle.go`, `backend/internal/payment/domain/intent.go`, `backend/internal/payment/payments.go`, `backend/postgres/queries/payments.sql`, Migration `000005` |
 | Scheduler/Worker          | `payment_worker.go`, `standing_orders.go`, zugehörige SQL-Abfragen                      |
 | Admin und Audit           | `admin_handler.go`, `db/admin.go`, Migration `000007`                                  |
 | Kundenprofil/Adresse      | `profile_handler.go`, `db/profile.go`, Migration `000012`, Frontend `BankingApp.tsx` |

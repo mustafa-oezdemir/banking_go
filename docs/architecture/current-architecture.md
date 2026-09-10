@@ -1,10 +1,10 @@
 # Current Architecture
 
-Status: Phase 1 domain-module architecture
+Status: Architecture Phase 2 domain/application/infrastructure separation
 
 Last verified: 2026-09-10
 
-Scope: Phase 1 completion state
+Scope: Phase 2 completion state
 
 ## Purpose and system boundary
 
@@ -58,14 +58,16 @@ flowchart TB
     Main["cmd/main\ncomposition root and routes"]
     Worker["cmd/worker\nscheduled-payment loop"]
     HTTP["internal/platform/httpapi\nHTTP, auth, validation, DTOs"]
-    Identity["internal/identity\ncredential policy"]
-    Account["internal/account\nIBAN and profile rules"]
-    Ledger["internal/ledger\nmoney and double-entry rules"]
-    Payment["internal/payment\npayment lifecycle and scheduler"]
+    Identity["internal/identity\ncredential and authentication application boundary"]
+    Account["internal/account\nprofile application boundary and ownership rules"]
+    Ledger["internal/ledger\nledger application service and repository port"]
+    LedgerDomain["internal/ledger/domain\nposting plan and financial invariants"]
+    Payment["internal/payment\npayment application service and scheduler"]
+    PaymentDomain["internal/payment/domain\nlifecycle and idempotent intent"]
     Notify["internal/notification\nmessage and Sender port"]
     Bootstrap["internal/platform/bootstrap\nseed adapter"]
     Email["internal/platform/email\nSMTP and Resend adapters"]
-    DBStore["internal/platform/database\ntransaction helper and manual SQL"]
+    DBStore["internal/platform/database\nPostgreSQL repositories and unit of work"]
     SQLC["postgres/sqlc\ngenerated persistence API"]
     PG[("PostgreSQL")]
 
@@ -87,10 +89,11 @@ flowchart TB
     HTTP --> DBStore
     HTTP --> SQLC
     Ledger --> Account
-    Ledger --> DBStore
-    Ledger --> SQLC
+    Ledger --> LedgerDomain
     Payment --> Account
     Payment --> Ledger
+    Payment --> LedgerDomain
+    Payment --> PaymentDomain
     Payment --> Notify
     Payment --> DBStore
     Payment --> SQLC
@@ -103,10 +106,14 @@ flowchart TB
     Email --> Notify
     Email --> Account
     DBStore --> SQLC
+    DBStore --> Identity
+    DBStore --> Account
+    DBStore --> Ledger
+    DBStore --> LedgerDomain
     SQLC --> PG
 ```
 
-The arrows show compile-time dependencies. Domain ownership is now explicit and guarded by an architecture test. The direct Ledger/Payment dependency on the database adapter and sqlc is a documented Phase 1 transition; Phase 2 removes that persistence coupling without changing deployment topology.
+The arrows show compile-time dependencies. Ledger now depends on a module-owned repository port; its PostgreSQL implementation points inward from `platform/database`. Identity authentication and customer profile updates use the same port pattern. Payment lifecycle, intent equivalence, and ledger-posting decisions are pure, while `payment.Service` deliberately retains its concrete PostgreSQL unit of work so booking state, entries, balances, and audit remain atomic. ADR-003 documents this narrow exception. The architecture test guards both module direction and infrastructure-free core packages.
 
 ## Executables and entry points
 
@@ -122,8 +129,8 @@ The backend image additionally embeds `golang-migrate`, migrations, the API bina
 
 | Capability | Main routes | Current implementation |
 | --- | --- | --- |
-| Identity/session | `/register`, `/login`, `/logout`, `/session`, `/forgot-password`, `/reset-password` | `internal/identity`, `internal/platform/httpapi`, `internal/platform/database` |
-| Customer profile | `GET/PATCH /profile` | `account` normalization rules plus HTTP/database adapters |
+| Identity/session | `/register`, `/login`, `/logout`, `/session`, `/forgot-password`, `/reset-password` | Authentication application service and port plus HTTP/database adapters; reset/session middleware remains adapter-orchestrated |
+| Customer profile | `GET/PATCH /profile` | `account.ProfileService` and repository port plus HTTP/database adapters |
 | Accounts | `/accounts`, `/accounts/{id}` | Handler-owned orchestration plus sqlc/store access |
 | Ledger views | `/accounts/{id}/entries`, `/transactions/{id}`, `/accounts/{id}/reconcile` | Handler + ledger service + store |
 | Own-account transfer | `POST /transfers` | `ledger.Service.Transfer` |
@@ -167,7 +174,7 @@ The database enforces entry shape, status vocabularies, unique IBANs, and append
 
 ## Transactions and consistency boundaries
 
-`db.Store.ExecTx` uses PostgreSQL `SERIALIZABLE` transactions, retries SQLSTATE `40001` up to ten times with capped backoff, and rolls back on any callback error.
+`db.Store.ExecTx` uses PostgreSQL `SERIALIZABLE` transactions, retries SQLSTATE `40001` up to ten times with capped backoff, and rolls back on any callback error. The ledger application accesses this behavior only through `ledger.Repository`; the payment application retains the concrete unit of work as the explicit ADR-003 exception.
 
 | Operation | Atomic unit |
 | --- | --- |
@@ -205,7 +212,7 @@ Email delivery is post-commit by design and never participates in a financial tr
 - Ownership checks exist in handlers, queries, or services depending on the flow.
 - Administrator authorization re-reads the role from PostgreSQL rather than trusting a role claim.
 
-Credential normalization, password policy, hashing, and verification now live in `internal/identity` without HTTP or PostgreSQL dependencies. Login, JWT/session orchestration, role lookup, and reset-token persistence remain coupled to the HTTP and database adapters and are Phase 2 work.
+Credential normalization, password policy, hashing, verification, and login orchestration live in `internal/identity` without HTTP or PostgreSQL dependencies. `AuthenticationService` uses a narrow repository port and returns only the identity and session generation required for token issuance. JWT/cookie issuance, active-session middleware, role lookup, and reset-token transport remain adapter responsibilities.
 
 ## Notifications and live updates
 
@@ -238,8 +245,8 @@ GitHub Actions provides:
 
 | Risk | Evidence | Consequence |
 | --- | --- | --- |
-| Ledger/payment application code still depends on persistence | `internal/ledger` and `internal/payment` accept `*db.Store` and expose sqlc records | Important orchestration still needs PostgreSQL; Phase 2 introduces narrow ports and mappings. |
-| HTTP layer still contains application orchestration | Account creation, beneficiary operations, and authorization orchestration remain in `platform/httpapi` | Phase 2 must move useful use cases behind module APIs without mechanical abstraction. |
+| Payment application retains concrete persistence | `internal/payment` owns a serializable cross-table booking workflow over `*db.Store` | ADR-003 preserves atomic locking/booking semantics and forbids expanding this exception without a useful unit-of-work contract. |
+| HTTP layer still contains some simple orchestration | Account creation, beneficiary operations, role/session checks, and reset-token transport remain in `platform/httpapi` | Extract only when a cohesive use case or alternate adapter justifies a boundary; do not create pass-through interfaces. |
 | Concrete store is shared by adapters and banking services | HTTP, ledger, payment, bootstrap, and email use `*db.Store` | The architecture test prevents arbitrary imports, but data ownership still depends on code discipline. |
 | Notification adapter reads banking tables | Email loads users and accounts directly | It cannot become an independent service without changing its contract and data ownership. |
 | Non-durable post-commit queue | Activity notifications use an in-memory channel | Restart, saturation, or multiple instances can lose notifications. |
@@ -250,6 +257,6 @@ GitHub Actions provides:
 | Database-level balance invariant is incomplete | DB checks individual entries but not transaction-wide debit=credit | A future writer bypassing services could create an unbalanced transaction. |
 | API contract drift risk | Routes, handwritten frontend endpoints, Swagger, and handlers are maintained separately | Dormant or missing routes can remain unnoticed without contract tests. |
 
-## Baseline conclusion
+## Phase 2 conclusion
 
-Phase 1 establishes a domain-oriented modular monolith while retaining the strong local consistency mechanisms. The next safe move is Phase 2: replace concrete persistence and transport coupling with useful application ports and unit-testable rules, while keeping Account, Payment, and Ledger in one process and one serializable transaction boundary.
+Phase 2 separates critical rules from delivery and persistence mechanisms without changing deployment or data ownership. Ledger, profile, and authentication now have narrow application ports; payment lifecycle, idempotency intent, ownership, insufficient-funds, and balanced-posting rules are independently testable. Account, Payment, and Ledger remain one process and one serializable PostgreSQL consistency boundary. No later architecture phase starts without explicit approval.

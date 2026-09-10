@@ -220,10 +220,10 @@ For a control-by-control source file map and the remaining real-bank requirement
 .
 ├── backend/
 │   ├── cmd/                    API and worker entry points
-│   ├── internal/identity/      Credential and password policy
-│   ├── internal/account/       IBAN and customer profile rules
-│   ├── internal/ledger/        Money and double-entry operations
-│   ├── internal/payment/       Payment lifecycle, VoP and scheduling
+│   ├── internal/identity/      Credential policy and authentication application port
+│   ├── internal/account/       IBAN, ownership and profile application port
+│   ├── internal/ledger/        Ledger application service, port and pure posting domain
+│   ├── internal/payment/       Payment orchestration, pure lifecycle/intent domain and scheduling
 │   ├── internal/notification/  Provider-neutral notification port
 │   ├── internal/platform/      HTTP, database, email and bootstrap adapters
 │   ├── internal/architecture/  Enforced module dependency rules

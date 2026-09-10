@@ -44,7 +44,7 @@ func setupTestLedger(t *testing.T) *testLedger {
 	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 
 	store := db.NewStore(sqlDB)
-	return &testLedger{Service: ledger.NewService(store), store: store}
+	return &testLedger{Service: ledger.NewService(db.NewLedgerRepository(store)), store: store}
 }
 
 func mustDemoIBAN(t *testing.T) string {

@@ -5,6 +5,8 @@
 - Deciders: Project owner and architecture roadmap
 - Scope: Phase 1 backend modularization
 
+Application/infrastructure separation within these boundaries is refined by [ADR-003](ADR-003-domain-infrastructure-separation.md).
+
 ## Context
 
 The backend began as a package-by-technical-layer monolith: HTTP behavior lived in `internal/api`, banking and bootstrap behavior shared `internal/service`, persistence helpers lived in `internal/db`, and provider adapters lived beside business code. The deployment and PostgreSQL transaction model are appropriate for the project, but the source layout did not communicate ownership and made accidental coupling easy.

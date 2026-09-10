@@ -1,11 +1,11 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
-	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
 
 type profileResponse struct {
@@ -34,14 +34,13 @@ type updateProfileRequest struct {
 	CountryCode  string `json:"country_code"`
 }
 
-func mapProfile(profile db.CustomerProfile) profileResponse {
+func mapProfile(profile account.Profile) profileResponse {
 	return profileResponse{
 		ID: profile.ID.String(), Email: profile.Email, FullName: profile.FullName,
 		Phone: profile.Phone, BirthDate: profile.BirthDate, AddressLine1: profile.AddressLine1,
 		AddressLine2: profile.AddressLine2, PostalCode: profile.PostalCode, City: profile.City,
 		CountryCode: profile.CountryCode, UpdatedAt: profile.UpdatedAt,
-		ProfileComplete: profile.FullName != "" && profile.Phone != "" && profile.BirthDate != "" &&
-			profile.AddressLine1 != "" && profile.PostalCode != "" && profile.City != "" && profile.CountryCode != "",
+		ProfileComplete: profile.Complete(),
 	}
 }
 
@@ -59,7 +58,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	profile, err := h.store.GetCustomerProfile(r.Context(), userID)
+	profile, err := h.profiles.Get(r.Context(), userID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load profile")
 		return
@@ -90,17 +89,16 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
-	birthDate, err := validateProfileInput(&input, time.Now().UTC())
-	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	profile, err := h.store.UpdateCustomerProfile(r.Context(), db.UpdateCustomerProfileParams{
-		UserID: userID, FullName: input.FullName, Phone: input.Phone, BirthDate: birthDate,
+	profile, err := h.profiles.Update(r.Context(), userID, account.ProfileInput{
+		FullName: input.FullName, Phone: input.Phone, BirthDate: input.BirthDate,
 		AddressLine1: input.AddressLine1, AddressLine2: input.AddressLine2,
 		PostalCode: input.PostalCode, City: input.City, CountryCode: input.CountryCode,
 	})
 	if err != nil {
+		if errors.Is(err, account.ErrInvalidProfile) {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, "failed to update profile")
 		return
 	}

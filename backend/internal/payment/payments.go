@@ -15,22 +15,24 @@ import (
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	ledgerdomain "github.com/mustafa-oezdemir/banking_go/internal/ledger/domain"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
+	paymentdomain "github.com/mustafa-oezdemir/banking_go/internal/payment/domain"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 const (
 	// PaymentAwaitingConfirmation is the state before explicit demo consent.
-	PaymentAwaitingConfirmation = "AWAITING_CONFIRMATION"
+	PaymentAwaitingConfirmation = string(paymentdomain.StatusAwaitingConfirmation)
 	// PaymentScheduled is the state of a confirmed future payment.
-	PaymentScheduled = "SCHEDULED"
+	PaymentScheduled = string(paymentdomain.StatusScheduled)
 	// PaymentProcessing is the exclusively claimed booking state.
-	PaymentProcessing = "PROCESSING"
+	PaymentProcessing = string(paymentdomain.StatusProcessing)
 	// PaymentBooked is the terminal successful state.
-	PaymentBooked = "BOOKED"
+	PaymentBooked = string(paymentdomain.StatusBooked)
 	// PaymentFailed is the terminal rejected or failed state.
-	PaymentFailed = "FAILED"
+	PaymentFailed = string(paymentdomain.StatusFailed)
 
 	// ScheduleImmediate requests processing during confirmation.
 	ScheduleImmediate = "IMMEDIATE"
@@ -47,13 +49,13 @@ var (
 	// ErrPaymentNotFound indicates an unknown or owner-inaccessible payment.
 	ErrPaymentNotFound = errors.New("payment order not found")
 	// ErrInvalidPaymentState indicates a disallowed state-machine transition.
-	ErrInvalidPaymentState = errors.New("payment cannot transition from its current state")
+	ErrInvalidPaymentState = paymentdomain.ErrInvalidTransition
 	// ErrVoPOverrideRequired requires explicit consent for a non-match result.
 	ErrVoPOverrideRequired = errors.New("explicit confirmation is required for this payee verification result")
 	// ErrIdempotencyConflict indicates reuse of a key with a changed intent.
 	ErrIdempotencyConflict = errors.New("idempotency key was already used for a different payment")
 	// ErrAccountBlocked indicates that the source or destination is inactive.
-	ErrAccountBlocked = errors.New("account is not active")
+	ErrAccountBlocked = ledger.ErrAccountBlocked
 	// ErrPaymentUnauthorized indicates that the source is not owned by the caller.
 	ErrPaymentUnauthorized = errors.New("source account does not belong to the authenticated user")
 	// ErrInvalidPaymentInput indicates malformed payment intent data.
@@ -135,7 +137,7 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 	input.TransferType = strings.ToUpper(strings.TrimSpace(input.TransferType))
 	input.ScheduleType = strings.ToUpper(strings.TrimSpace(input.ScheduleType))
 
-	amount, err := validatePaymentInput(input)
+	amount, err := validatePaymentInput(input, s.now())
 	if err != nil {
 		return CreatePaymentResult{}, err
 	}
@@ -155,7 +157,7 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 	if err != nil {
 		return CreatePaymentResult{}, ErrAccountNotFound
 	}
-	if source.IsSystem || !source.OwnerID.Valid || source.OwnerID.UUID != input.OwnerID {
+	if !sepa.CustomerCanOperate(input.OwnerID, source.OwnerID.UUID, source.OwnerID.Valid, source.IsSystem) {
 		return CreatePaymentResult{}, ErrPaymentUnauthorized
 	}
 	if source.Status != "ACTIVE" {
@@ -260,9 +262,19 @@ func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UU
 			return ErrVoPOverrideRequired
 		}
 
+		targetStatus := PaymentProcessing
 		if order.ScheduleType == ScheduleScheduled && order.RequestedExecutionAt.After(s.now()) {
+			targetStatus = PaymentScheduled
+		}
+		if transitionErr := paymentdomain.ValidateTransition(
+			paymentdomain.Status(order.Status), paymentdomain.Status(targetStatus),
+		); transitionErr != nil {
+			return ErrInvalidPaymentState
+		}
+
+		if targetStatus == PaymentScheduled {
 			result, err = q.ConfirmPaymentOrder(ctx, sqlc.ConfirmPaymentOrderParams{
-				Status: PaymentScheduled, VopOverridden: requiresOverride,
+				Status: targetStatus, VopOverridden: requiresOverride,
 				PaymentOrderID: paymentID, OwnerID: ownerID,
 			})
 			if err != nil {
@@ -274,7 +286,7 @@ func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UU
 		}
 
 		order, err = q.ConfirmPaymentOrder(ctx, sqlc.ConfirmPaymentOrderParams{
-			Status: PaymentProcessing, VopOverridden: requiresOverride,
+			Status: targetStatus, VopOverridden: requiresOverride,
 			PaymentOrderID: paymentID, OwnerID: ownerID,
 		})
 		if err != nil {
@@ -340,6 +352,9 @@ func (s *Service) ListPayments(ctx context.Context, ownerID uuid.UUID, limit, of
 }
 
 func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc.PaymentOrder) (sqlc.PaymentOrder, error) {
+	if err := paymentdomain.ValidateTransition(paymentdomain.Status(order.Status), paymentdomain.StatusBooked); err != nil {
+		return sqlc.PaymentOrder{}, ErrInvalidPaymentState
+	}
 	amount, err := decimal.NewFromString(order.Amount)
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
 		return sqlc.PaymentOrder{}, ErrInvalidAmount
@@ -357,7 +372,6 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 	if destinationID == order.SourceAccountID {
 		return sqlc.PaymentOrder{}, ErrSameAccountTransfer
 	}
-
 	accounts, err := q.ListAccountsForUpdate(ctx, []uuid.UUID{order.SourceAccountID, destinationID})
 	if err != nil {
 		return sqlc.PaymentOrder{}, err
@@ -368,21 +382,28 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 	accountByID := map[uuid.UUID]sqlc.Account{accounts[0].ID: accounts[0], accounts[1].ID: accounts[1]}
 	source := accountByID[order.SourceAccountID]
 	destination := accountByID[destinationID]
-	if source.IsSystem || !source.OwnerID.Valid || source.OwnerID.UUID != order.OwnerID {
-		return sqlc.PaymentOrder{}, ErrPaymentUnauthorized
-	}
-	if source.Status != "ACTIVE" || destination.Status != "ACTIVE" {
-		return sqlc.PaymentOrder{}, ErrAccountBlocked
-	}
-	if source.Currency != "EUR" || destination.Currency != "EUR" {
-		return sqlc.PaymentOrder{}, ErrCurrencyMismatch
-	}
 	available, err := decimal.NewFromString(source.AvailableBalance)
 	if err != nil {
 		return sqlc.PaymentOrder{}, errors.New("invalid available balance")
 	}
-	if available.LessThan(amount) {
-		return sqlc.PaymentOrder{}, ErrInsufficientFunds
+	posting, err := ledgerdomain.PlanCustomerTransfer(
+		order.OwnerID,
+		ledgerdomain.AccountSnapshot{
+			ID: source.ID, OwnerID: source.OwnerID.UUID, OwnerAssigned: source.OwnerID.Valid,
+			Currency: source.Currency, Status: source.Status, AvailableBalance: available, System: source.IsSystem,
+		},
+		ledgerdomain.AccountSnapshot{
+			ID: destination.ID, OwnerID: destination.OwnerID.UUID, OwnerAssigned: destination.OwnerID.Valid,
+			Currency: destination.Currency, Status: destination.Status, System: destination.IsSystem,
+		},
+		amount,
+		ledgerdomain.TransferPolicy{AllowSystemDestination: true},
+	)
+	if err != nil {
+		if errors.Is(err, ledgerdomain.ErrAccountOwnership) || errors.Is(err, ledgerdomain.ErrSystemAccount) {
+			return sqlc.PaymentOrder{}, ErrPaymentUnauthorized
+		}
+		return sqlc.PaymentOrder{}, err
 	}
 
 	txID := uuid.New()
@@ -397,9 +418,9 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 	}
 
 	sourceEntry := entryBase
-	sourceEntry.AccountID = source.ID
-	sourceEntry.Debit = amount.StringFixed(4)
-	sourceEntry.Credit = decimal.Zero.StringFixed(4)
+	sourceEntry.AccountID = posting.DebitLeg.AccountID
+	sourceEntry.Debit = posting.DebitLeg.Debit.StringFixed(4)
+	sourceEntry.Credit = posting.DebitLeg.Credit.StringFixed(4)
 	sourceEntry.Description = nullString("SEPA-Demoüberweisung " + order.EndToEndID)
 	sourceEntry.CounterpartyName = nullString(order.BeneficiaryName)
 	sourceEntry.CounterpartyIban = nullString(sepa.MaskIBAN(order.BeneficiaryIban))
@@ -412,9 +433,9 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 		return sqlc.PaymentOrder{}, senderErr
 	}
 	destinationEntry := entryBase
-	destinationEntry.AccountID = destination.ID
-	destinationEntry.Debit = decimal.Zero.StringFixed(4)
-	destinationEntry.Credit = amount.StringFixed(4)
+	destinationEntry.AccountID = posting.CreditLeg.AccountID
+	destinationEntry.Debit = posting.CreditLeg.Debit.StringFixed(4)
+	destinationEntry.Credit = posting.CreditLeg.Credit.StringFixed(4)
 	destinationEntry.Description = nullString("SEPA-Demoeingang " + order.EndToEndID)
 	destinationEntry.CounterpartyName = nullString(sender.FullName)
 	destinationEntry.CounterpartyIban = nullString(sepa.MaskIBAN(source.Iban))
@@ -422,10 +443,14 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 		return sqlc.PaymentOrder{}, err
 	}
 
-	if err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{Balance: amount.Neg().StringFixed(4), ID: source.ID}); err != nil {
+	if err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: posting.DebitLeg.Debit.Neg().StringFixed(4), ID: posting.DebitLeg.AccountID,
+	}); err != nil {
 		return sqlc.PaymentOrder{}, err
 	}
-	if err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{Balance: amount.StringFixed(4), ID: destination.ID}); err != nil {
+	if err = q.UpdateAccountBalance(ctx, sqlc.UpdateAccountBalanceParams{
+		Balance: posting.CreditLeg.Credit.StringFixed(4), ID: posting.CreditLeg.AccountID,
+	}); err != nil {
 		return sqlc.PaymentOrder{}, err
 	}
 	return q.MarkPaymentBooked(ctx, sqlc.MarkPaymentBookedParams{
@@ -453,7 +478,7 @@ func (s *Service) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrd
 	})
 }
 
-func validatePaymentInput(input CreatePaymentInput) (decimal.Decimal, error) {
+func validatePaymentInput(input CreatePaymentInput, now time.Time) (decimal.Decimal, error) {
 	if input.OwnerID == uuid.Nil || input.SourceAccountID == uuid.Nil || input.BeneficiaryName == "" || utf8.RuneCountInString(input.BeneficiaryName) > 140 {
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
@@ -479,7 +504,7 @@ func validatePaymentInput(input CreatePaymentInput) (decimal.Decimal, error) {
 	if input.ScheduleType != ScheduleImmediate && input.ScheduleType != ScheduleScheduled {
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
-	if input.ScheduleType == ScheduleScheduled && input.RequestedExecution.Before(time.Now().Add(-time.Minute)) {
+	if input.ScheduleType == ScheduleScheduled && input.RequestedExecution.Before(now.Add(-time.Minute)) {
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
 	return amount, nil
@@ -490,31 +515,29 @@ func samePaymentIntent(order sqlc.PaymentOrder, input CreatePaymentInput, amount
 	if err != nil {
 		return false
 	}
-	sameExecution := true
-	if input.ScheduleType == ScheduleScheduled {
-		// PostgreSQL rounds timestamps to microseconds. Accept that storage-only
-		// difference so the original request remains an idempotent replay.
-		executionDelta := order.RequestedExecutionAt.UTC().Sub(input.RequestedExecution.UTC())
-		if executionDelta < 0 {
-			executionDelta = -executionDelta
-		}
-		sameExecution = executionDelta <= time.Microsecond
-	}
-	wantsInstant := input.TransferType == PaymentInstant
-	isInstant := order.PaymentKind == "SEPA_INSTANT"
-	return order.SourceAccountID == input.SourceAccountID &&
-		order.BeneficiaryIban == input.BeneficiaryIBAN &&
-		order.BeneficiaryName == input.BeneficiaryName &&
-		order.BeneficiaryBic.String == input.BeneficiaryBIC &&
-		storedAmount.Equal(amount) &&
-		order.ScheduleType == input.ScheduleType &&
-		order.Purpose.String == input.Purpose &&
-		order.CreditorReference.String == input.CreditorReference &&
-		sameExecution &&
-		(wantsInstant == isInstant || order.PaymentKind == "INTERNAL" || order.PaymentKind == "UMBUCHUNG")
+	return paymentdomain.EquivalentIntent(
+		paymentdomain.Intent{
+			SourceAccountID: order.SourceAccountID, BeneficiaryName: order.BeneficiaryName,
+			BeneficiaryIBAN: order.BeneficiaryIban, BeneficiaryBIC: order.BeneficiaryBic.String,
+			Amount: storedAmount, ScheduleType: order.ScheduleType, Purpose: order.Purpose.String,
+			CreditorReference: order.CreditorReference.String, RequestedExecution: order.RequestedExecutionAt,
+			Instant:  order.PaymentKind == "SEPA_INSTANT",
+			Internal: order.PaymentKind == "INTERNAL" || order.PaymentKind == "UMBUCHUNG",
+		},
+		paymentdomain.Intent{
+			SourceAccountID: input.SourceAccountID, BeneficiaryName: input.BeneficiaryName,
+			BeneficiaryIBAN: input.BeneficiaryIBAN, BeneficiaryBIC: input.BeneficiaryBIC,
+			Amount: amount, ScheduleType: input.ScheduleType, Purpose: input.Purpose,
+			CreditorReference: input.CreditorReference, RequestedExecution: input.RequestedExecution,
+			Instant: input.TransferType == PaymentInstant,
+		},
+	)
 }
 
 func markFailed(ctx context.Context, q *sqlc.Queries, order sqlc.PaymentOrder, cause error) (sqlc.PaymentOrder, error) {
+	if err := paymentdomain.ValidateTransition(paymentdomain.Status(order.Status), paymentdomain.StatusFailed); err != nil {
+		return sqlc.PaymentOrder{}, ErrInvalidPaymentState
+	}
 	return q.MarkPaymentFailed(ctx, sqlc.MarkPaymentFailedParams{
 		FailureReason:  nullString(publicFailureReason(cause)),
 		RejectCode:     nullString(rejectCode(cause)),
