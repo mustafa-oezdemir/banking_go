@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -28,8 +29,12 @@ func TestUpdateCustomerProfilePersistsAndAudits(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = database.ExecContext(t.Context(), `DELETE FROM audit_events WHERE owner_id = $1 AND event_type = 'PROFILE_UPDATED'`, user.ID)
-		_, _ = database.ExecContext(t.Context(), `DELETE FROM users WHERE id = $1`, user.ID)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, cleanupErr := database.ExecContext(cleanupCtx, `DELETE FROM audit_events WHERE owner_id = $1 AND event_type = 'PROFILE_UPDATED'`, user.ID)
+		require.NoError(t, cleanupErr)
+		_, cleanupErr = database.ExecContext(cleanupCtx, `DELETE FROM users WHERE id = $1`, user.ID)
+		require.NoError(t, cleanupErr)
 	})
 
 	updated, err := store.UpdateCustomerProfile(t.Context(), UpdateCustomerProfileParams{

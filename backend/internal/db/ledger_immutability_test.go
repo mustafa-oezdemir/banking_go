@@ -27,7 +27,7 @@ func TestLedgerEntriesAreAppendOnly(t *testing.T) {
 		t.Run(mutation[:6], func(t *testing.T) {
 			tx, txErr := database.BeginTx(t.Context(), nil)
 			require.NoError(t, txErr)
-			defer func() { _ = tx.Rollback() }()
+			defer func() { require.NoError(t, tx.Rollback()) }()
 
 			var accountID uuid.UUID
 			txErr = tx.QueryRowContext(context.Background(), `

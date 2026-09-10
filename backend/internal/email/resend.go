@@ -27,7 +27,7 @@ import (
 const (
 	defaultResendEndpoint = "https://api.resend.com/emails"
 	defaultFromAddress    = "Pehlione DemoBank <banking@pehlione.com>"
-	defaultFrontendURL    = "https://pehlione-banking-frontend.onrender.com"
+	defaultFrontendURL    = "http://localhost:3000"
 	activityQueueSize     = 100
 )
 

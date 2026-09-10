@@ -12,7 +12,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[Live Demo](https://pehlione-banking-frontend.onrender.com) · [API Health](https://banking-go.onrender.com/health) · [Swagger](https://banking-go.onrender.com/swagger/index.html) · [Security Report](SECURITY_PENTEST_REPORT.md)
+[Local UI](http://localhost:3000) · [API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Security Report](SECURITY_PENTEST_REPORT.md)
 
 </div>
 
@@ -21,7 +21,7 @@
 
 ## Overview
 
-Pehlione DemoBank is a full-stack banking sandbox for exploring German IBANs, SEPA-style payment orchestration and double-entry accounting. It combines a Go API, PostgreSQL ledger and responsive German Next.js interface in one Docker- and Render-ready repository.
+Pehlione DemoBank is a full-stack banking sandbox for exploring German IBANs, SEPA-style payment orchestration and double-entry accounting. It combines a Go API, PostgreSQL ledger and responsive German Next.js interface in one Docker-ready repository.
 
 Every new customer receives a fictional EUR Girokonto, a valid demo IBAN and a balanced **€500 opening credit** in one database transaction.
 
@@ -75,7 +75,7 @@ Money travels through the API as decimal strings, uses `decimal` in Go and is st
 | Backend | Go 1.26, Chi Router, sqlc, JWT, zerolog |
 | Database | PostgreSQL 16, additive migrations, immutable ledger entries |
 | Background work | In-process scheduler or standalone Go worker |
-| Delivery | Docker Compose, Render Blueprint, GitHub Actions, CodeQL |
+| Delivery | Docker Compose, GitHub Actions, CodeQL |
 
 ## Quick start
 
@@ -92,9 +92,9 @@ docker compose up --build
 | Service | Local URL |
 | --- | --- |
 | Banking UI | [localhost:3000](http://localhost:3000) |
-| API health | [localhost:8080/health](http://localhost:8080/health) |
-| Swagger UI | [localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) |
-| MailHog inbox (hybrid development) | [localhost:8425](http://localhost:8425) |
+| API health | [localhost:8383/health](http://localhost:8383/health) |
+| Swagger UI | [localhost:8383/swagger/index.html](http://localhost:8383/swagger/index.html) |
+| MailHog inbox | [localhost:8425](http://localhost:8425) |
 | PostgreSQL | `localhost:5433` |
 
 Stop the stack with `docker compose down`. Add `-v` only when you intentionally want to remove the local PostgreSQL volume.
@@ -106,7 +106,7 @@ DEMO_SEED=true
 DEMO_SEED_PASSWORD=<unique-secret-with-15-to-72-bytes>
 ```
 
-The idempotent seed creates the fictional users `anna.beispiel@demo.invalid` and `max.mustermann@demo.invalid`, demo accounts, beneficiaries and sample payments. All names, addresses, balances and transactions must remain fictional; never enter real personal data in a demo environment.
+The idempotent seed creates the fictional users `helga.müller@pehlione.com`, `jonas.schneider@pehlione.com` and `sofia.wagner@pehlione.com`, demo accounts, beneficiaries and sample payments. All names, addresses, balances and transactions must remain fictional; never enter real personal data in a demo environment.
 
 ### Hybrid local development (Windows)
 
@@ -194,30 +194,10 @@ Password-reset and account-activity messages are delivered through SMTP in local
 ```env
 RESEND_API_KEY=re_...
 MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
-FRONTEND_URL=https://pehlione-banking-frontend.onrender.com
+FRONTEND_URL=http://localhost:3000
 ```
 
 When `SMTP_HOST` is configured it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. Email delivery is intentionally decoupled from ledger commits: a provider outage is logged but never rolls back or duplicates a financial transaction.
-
-## Render deployment
-
-The repository includes a [`render.yaml`](render.yaml) Blueprint that deploys the `main` branch in Frankfurt:
-
-- `pehlione-banking` — Go backend web service.
-- `pehlione-banking-frontend` — Next.js frontend web service.
-- `ledger-db` — PostgreSQL database.
-
-1. In Render, select **New → Blueprint** and connect this repository.
-2. Select `render.yaml` from `main`.
-3. Configure `ADMIN_SEED_PASSWORD` if administrator bootstrap is required.
-4. Add `RESEND_API_KEY`, verify `pehlione.com` in Resend and confirm `MAIL_FROM`.
-5. Keep `DEMO_SEED=false` for a clean public environment, or configure a separate `DEMO_SEED_PASSWORD`.
-6. Deploy and verify `/health` before opening the frontend.
-
-> [!NOTE]
-> The free profile runs scheduled work inside the web process. Free services can sleep, so execution time is not guaranteed. For reliable scheduling, merge [`render.worker.example.yaml`](render.worker.example.yaml), disable the in-process scheduler and use a paid background worker connected to the same database.
-
-See Render's current [free service limits](https://render.com/docs/free) and [Blueprint specification](https://render.com/docs/blueprint-spec) before production-like testing.
 
 ## Security model
 
@@ -249,7 +229,7 @@ For a control-by-control source file map and the remaining real-bank requirement
 │   ├── components/banking/     Banking UI and transfer wizard
 │   └── lib/                    API client, state and types
 ├── docker-compose.yml
-└── render.yaml
+└── docker-compose.dev.yml
 ```
 
 ## Reference material

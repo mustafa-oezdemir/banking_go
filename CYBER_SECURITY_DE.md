@@ -2,7 +2,7 @@
 
 Letzte Prüfung: **10. September 2026**
 
-Umfang: Go-API, Next.js-Frontend, PostgreSQL-Ledger, Docker/Render und CI/CD
+Umfang: Go-API, Next.js-Frontend, PostgreSQL-Ledger, Docker und CI/CD
 
 [Türkçe sürüm](CYBER_SECURITY.md)
 
@@ -193,7 +193,7 @@ Die aktuellen Grenzwerte stehen in `backend/cmd/main.go`:
 - VoP: 30 Requests pro Minute und IP.
 - Payment Create/Confirm: 20 Requests pro Minute und IP.
 
-`backend/internal/api/security.go` vertraut Proxy-Headern nur unter Render oder bei ausdrücklich aktiviertem Trusted-Proxy-Modus.
+`backend/internal/api/security.go` vertraut Proxy-Headern nur bei ausdrücklich aktiviertem Trusted-Proxy-Modus.
 
 🟡 Der aktuelle Limiter lebt im Process Memory. Für mehrere Instanzen sind ein verteilter Redis-/API-Gateway-Limiter, kombinierte Benutzer-/Geräte-/IP-Schlüssel, WAF, Bot Management und Anomalieerkennung erforderlich.
 
@@ -204,9 +204,9 @@ Die aktuellen Grenzwerte stehen in `backend/cmd/main.go`:
 | Non-root Backend | `backend/Dockerfile` | Runtime läuft als `appuser` mit UID 10001. |
 | Non-root Frontend | `frontend/Dockerfile` | Runtime läuft als `nextjs` mit UID 1001. |
 | Minimale Runtime | Beide Dockerfiles | Multi-stage Builds; npm/corepack werden aus der Frontend-Runtime entfernt. |
-| Healthchecks | Dockerfiles, Compose, `render.yaml` | Backend, Frontend und Datenbank besitzen Healthchecks. |
-| Secrets außerhalb des Repositories | `.gitignore`, `.env.example`, `render.yaml` | Die echte `.env` wird nicht committed; Render erzeugt bzw. injiziert Secrets. |
-| Demo Seed deaktiviert | `.env.example`, `render.yaml` | `DEMO_SEED=false` ist Standard und ohne separates Passwort wird kein Seed ausgeführt. |
+| Healthchecks | Dockerfiles und Compose-Dateien | Backend, Frontend und Datenbank besitzen Healthchecks. |
+| Secrets außerhalb des Repositories | `.gitignore`, `.env.example` | Die echte `.env` wird nicht committed und separat in die Laufzeitumgebung eingebracht. |
+| Demo Seed deaktiviert | `.env.example`, Compose-Dateien | `DEMO_SEED=false` ist Standard und ohne separates Passwort wird kein Seed ausgeführt. |
 
 ### Zusätzliche Produktionsanforderungen
 
@@ -304,7 +304,7 @@ yarn build
 | Admin und Audit | `admin_handler.go`, `db/admin.go`, Migration `000007` |
 | Kundenprofil/Adresse | `profile_handler.go`, `db/profile.go`, Migration `000012`, Frontend `BankingApp.tsx` |
 | Ledger-Unveränderbarkeit | Migration `000011`, `ledger_immutability_test.go` |
-| Docker/Secrets/Deployment | Dockerfiles, Compose-Dateien, `render.yaml`, `.env.example` |
+| Docker/Secrets/Deployment | Dockerfiles, Compose-Dateien, `.env.example` |
 | CI-Sicherheitsgate | `.github/workflows/*.yml`, `.github/dependabot.yml` |
 
 ## Zugehörige Dokumente

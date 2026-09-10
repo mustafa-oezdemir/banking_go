@@ -13,6 +13,10 @@ func TestNormalizeEmail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "user@example.com", email)
 
+	email, err = normalizeEmail("Helga.Müller@Pehlione.com")
+	require.NoError(t, err)
+	assert.Equal(t, "helga.müller@pehlione.com", email)
+
 	for _, invalid := range []string{"", "not-an-email", "Name <user@example.com>"} {
 		_, err = normalizeEmail(invalid)
 		assert.Error(t, err)

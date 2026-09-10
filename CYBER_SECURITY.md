@@ -2,7 +2,7 @@
 
 Son inceleme: **10 Eylül 2026**
 
-Kapsam: Go API, Next.js frontend, PostgreSQL ledger, Docker/Render ve CI/CD
+Kapsam: Go API, Next.js frontend, PostgreSQL ledger, Docker ve CI/CD
 
 [Deutsche Version](CYBER_SECURITY_DE.md)
 
@@ -193,7 +193,7 @@ Mevcut limitler `backend/cmd/main.go` içinde tanımlıdır:
 - VoP: dakikada 30 istek/IP.
 - Payment create/confirm: dakikada 20 istek/IP.
 
-`backend/internal/api/security.go` proxy header'larını yalnız Render veya açıkça güvenilen proxy modunda kabul eder.
+`backend/internal/api/security.go` proxy header'larını yalnız açıkça güvenilen proxy modunda kabul eder.
 
 🟡 Mevcut limiter process memory'sindedir. Çok instance'lı production ortamında Redis/API gateway tabanlı dağıtık limit, kullanıcı+cihaz+IP bileşik anahtarı, WAF, bot yönetimi ve anomali tespiti gerekir.
 
@@ -204,9 +204,9 @@ Mevcut limitler `backend/cmd/main.go` içinde tanımlıdır:
 | Non-root backend | `backend/Dockerfile` | Runtime `appuser` UID 10001 ile çalışır. |
 | Non-root frontend | `frontend/Dockerfile` | Runtime `nextjs` UID 1001 ile çalışır. |
 | Minimal runtime | Her iki Dockerfile | Multi-stage build kullanılır; frontend runtime'dan npm/corepack kaldırılır. |
-| Healthcheck | Dockerfile'lar, Compose, `render.yaml` | Backend/frontend/DB için sağlık kontrolleri vardır. |
-| Secret'in repodan ayrılması | `.gitignore`, `.env.example`, `render.yaml` | Gerçek `.env` commit edilmez; Render secret generate/injection kullanır. |
-| Demo seed kapalı | `.env.example`, `render.yaml` | `DEMO_SEED=false` varsayılandır; parola olmadan seed çalışmaz. |
+| Healthcheck | Dockerfile'lar, Compose dosyaları | Backend/frontend/DB için sağlık kontrolleri vardır. |
+| Secret'in repodan ayrılması | `.gitignore`, `.env.example` | Gerçek `.env` commit edilmez; çalışma ortamına ayrıca aktarılır. |
+| Demo seed kapalı | `.env.example`, Compose dosyaları | `DEMO_SEED=false` varsayılandır; parola olmadan seed çalışmaz. |
 
 ### Production için ek gereksinimler
 
@@ -305,7 +305,7 @@ yarn build
 | Admin ve audit | `admin_handler.go`, `db/admin.go`, migration `000007` |
 | Müşteri profili/adres | `profile_handler.go`, `db/profile.go`, migration `000012`, frontend `BankingApp.tsx` |
 | Ledger değiştirilemezliği | migration `000011`, `ledger_immutability_test.go` |
-| Docker/secret/deployment | Dockerfile'lar, Compose dosyaları, `render.yaml`, `.env.example` |
+| Docker/secret/deployment | Dockerfile'lar, Compose dosyaları, `.env.example` |
 | CI güvenlik kapısı | `.github/workflows/*.yml`, `.github/dependabot.yml` |
 
 ## İlgili belgeler

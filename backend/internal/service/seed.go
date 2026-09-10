@@ -37,18 +37,25 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		return fmt.Errorf("hash demo seed password: %w", err)
 	}
 
-	anna, err := ensureDemoUser(ctx, store, "anna.beispiel@demo.invalid", "Anna Beispiel", 1000, string(demoHash))
+	helga, err := ensureDemoUser(ctx, store, "helga.müller@pehlione.com", "Helga Müller", 3100, string(demoHash))
 	if err != nil {
 		return err
 	}
-	maxUser, err := ensureDemoUser(ctx, store, "max.mustermann@demo.invalid", "Max Mustermann", 2000, string(demoHash))
+	jonas, err := ensureDemoUser(ctx, store, "jonas.schneider@pehlione.com", "Jonas Schneider", 3200, string(demoHash))
 	if err != nil {
 		return err
 	}
-	if err = ensureBalance(ctx, ledger, anna.current, "4850.00"); err != nil {
+	sofia, err := ensureDemoUser(ctx, store, "sofia.wagner@pehlione.com", "Sofia Wagner", 3300, string(demoHash))
+	if err != nil {
 		return err
 	}
-	if err = ensureBalance(ctx, ledger, maxUser.current, "2200.00"); err != nil {
+	if err = ensureBalance(ctx, ledger, helga.current, "4850.00"); err != nil {
+		return err
+	}
+	if err = ensureBalance(ctx, ledger, jonas.current, "2200.00"); err != nil {
+		return err
+	}
+	if err = ensureBalance(ctx, ledger, sofia.current, "1750.00"); err != nil {
 		return err
 	}
 
@@ -69,10 +76,10 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		return fmt.Errorf("seed streaming IBAN: %w", err)
 	}
 	for _, beneficiary := range []sqlc.CreateBeneficiaryParams{
-		{OwnerID: anna.user.ID, Name: "Beispiel Hausverwaltung GmbH", Iban: rentIBAN, Category: nullString("Wohnen")},
-		{OwnerID: anna.user.ID, Name: "Demo Markt Berlin", Iban: marketIBAN, Category: nullString("Lebensmittel")},
-		{OwnerID: anna.user.ID, Name: "Demo Verkehrsbetriebe", Iban: transitIBAN, Category: nullString("Mobilität")},
-		{OwnerID: anna.user.ID, Name: "Demo Streaming GmbH", Iban: streamIBAN, Category: nullString("Abonnements")},
+		{OwnerID: helga.user.ID, Name: "Beispiel Hausverwaltung GmbH", Iban: rentIBAN, Category: nullString("Wohnen")},
+		{OwnerID: helga.user.ID, Name: "Demo Markt Berlin", Iban: marketIBAN, Category: nullString("Lebensmittel")},
+		{OwnerID: helga.user.ID, Name: "Demo Verkehrsbetriebe", Iban: transitIBAN, Category: nullString("Mobilität")},
+		{OwnerID: helga.user.ID, Name: "Demo Streaming GmbH", Iban: streamIBAN, Category: nullString("Abonnements")},
 	} {
 		if _, err = store.CreateBeneficiary(ctx, beneficiary); err != nil {
 			return fmt.Errorf("seed beneficiary: %w", err)
@@ -80,10 +87,10 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 	}
 
 	paymentsToCreate := []CreatePaymentInput{
-		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Beispiel Hausverwaltung GmbH", BeneficiaryIBAN: rentIBAN, Amount: "980.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Miete August", IdempotencyKey: "demo-seed-rent-v1"},
-		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Markt Berlin", BeneficiaryIBAN: marketIBAN, Amount: "86.40", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Supermarkt", IdempotencyKey: "demo-seed-market-v1"}, //nolint:misspell // Correct German term.
-		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Max Mustermann", BeneficiaryIBAN: maxUser.current.Iban, Amount: "24.50", TransferType: PaymentInstant, ScheduleType: ScheduleImmediate, Purpose: "Abendessen", IdempotencyKey: "demo-seed-instant-v1"},
-		{OwnerID: anna.user.ID, SourceAccountID: anna.current.ID, BeneficiaryName: "Demo Verkehrsbetriebe", BeneficiaryIBAN: transitIBAN, Amount: "49.00", TransferType: PaymentStandard, ScheduleType: ScheduleScheduled, Purpose: "Deutschlandticket", RequestedExecution: time.Now().UTC().Add(72 * time.Hour), IdempotencyKey: "demo-seed-scheduled-v1"},
+		{OwnerID: helga.user.ID, SourceAccountID: helga.current.ID, BeneficiaryName: "Beispiel Hausverwaltung GmbH", BeneficiaryIBAN: rentIBAN, Amount: "980.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Miete August", IdempotencyKey: "demo-seed-rent-v2"},
+		{OwnerID: helga.user.ID, SourceAccountID: helga.current.ID, BeneficiaryName: "Demo Markt Berlin", BeneficiaryIBAN: marketIBAN, Amount: "86.40", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Supermarkt", IdempotencyKey: "demo-seed-market-v2"}, //nolint:misspell // Correct German term.
+		{OwnerID: helga.user.ID, SourceAccountID: helga.current.ID, BeneficiaryName: "Jonas Schneider", BeneficiaryIBAN: jonas.current.Iban, Amount: "24.50", TransferType: PaymentInstant, ScheduleType: ScheduleImmediate, Purpose: "Abendessen", IdempotencyKey: "demo-seed-instant-v2"},
+		{OwnerID: helga.user.ID, SourceAccountID: helga.current.ID, BeneficiaryName: "Demo Verkehrsbetriebe", BeneficiaryIBAN: transitIBAN, Amount: "49.00", TransferType: PaymentStandard, ScheduleType: ScheduleScheduled, Purpose: "Deutschlandticket", RequestedExecution: time.Now().UTC().Add(72 * time.Hour), IdempotencyKey: "demo-seed-scheduled-v2"},
 	}
 	for _, input := range paymentsToCreate {
 		if err = ensureSeedPayment(ctx, store, payments, input); err != nil {
@@ -91,7 +98,7 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		}
 	}
 
-	standing, err := store.ListStandingOrdersByOwner(ctx, anna.user.ID)
+	standing, err := store.ListStandingOrdersByOwner(ctx, helga.user.ID)
 	if err != nil {
 		return err
 	}
@@ -101,7 +108,7 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledger *LedgerService, p
 		}
 	}
 	_, err = payments.CreateStandingOrder(ctx, CreateStandingOrderInput{
-		OwnerID: anna.user.ID, SourceAccountID: anna.current.ID,
+		OwnerID: helga.user.ID, SourceAccountID: helga.current.ID,
 		BeneficiaryName: "Demo Streaming GmbH", BeneficiaryIBAN: streamIBAN,
 		Amount: "12.99", Purpose: "Demo Streaming Abo", TransferType: PaymentStandard,
 		Frequency: "MONTHLY", StartDate: time.Now().UTC().Add(24 * time.Hour),

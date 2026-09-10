@@ -14,6 +14,7 @@ import (
 var phonePattern = regexp.MustCompile(`^[+0-9() /-]+$`)
 
 type profileResponse struct {
+	UpdatedAt       time.Time `json:"updated_at"`
 	ID              string    `json:"id"`
 	Email           string    `json:"email"`
 	FullName        string    `json:"full_name"`
@@ -24,7 +25,6 @@ type profileResponse struct {
 	PostalCode      string    `json:"postal_code"`
 	City            string    `json:"city"`
 	CountryCode     string    `json:"country_code"`
-	UpdatedAt       time.Time `json:"updated_at"`
 	ProfileComplete bool      `json:"profile_complete"`
 }
 

@@ -13,7 +13,7 @@ import (
 // Email is intentionally read-only in this flow because changing it requires
 // a separate verified security process.
 type CustomerProfile struct {
-	ID           uuid.UUID
+	UpdatedAt    time.Time
 	Email        string
 	FullName     string
 	Phone        string
@@ -23,20 +23,20 @@ type CustomerProfile struct {
 	PostalCode   string
 	City         string
 	CountryCode  string
-	UpdatedAt    time.Time
+	ID           uuid.UUID
 }
 
 // UpdateCustomerProfileParams contains validated profile fields.
 type UpdateCustomerProfileParams struct {
-	UserID       uuid.UUID
+	BirthDate    time.Time
 	FullName     string
 	Phone        string
-	BirthDate    time.Time
 	AddressLine1 string
 	AddressLine2 string
 	PostalCode   string
 	City         string
 	CountryCode  string
+	UserID       uuid.UUID
 }
 
 const customerProfileColumns = `

@@ -22,7 +22,7 @@ import (
 	zlog "github.com/rs/zerolog/log"
 	httpSwagger "github.com/swaggo/http-swagger"
 
-	_ "github.com/mustafa-oezdemir/banking_go/docs"
+	bankdocs "github.com/mustafa-oezdemir/banking_go/docs"
 	"github.com/mustafa-oezdemir/banking_go/internal/api"
 	"github.com/mustafa-oezdemir/banking_go/internal/db"
 	emailservice "github.com/mustafa-oezdemir/banking_go/internal/email"
@@ -36,10 +36,23 @@ func initLogger() {
 	zlog.Info().Msg("Logger initialized")
 }
 
+func configureSwaggerBaseURL() {
+	rawURL := strings.TrimSpace(os.Getenv("SWAGGER_BASE_URL"))
+	if rawURL == "" {
+		return
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		zlog.Warn().Msg("Ignoring invalid SWAGGER_BASE_URL; expected an absolute HTTP(S) URL")
+		return
+	}
+	bankdocs.SwaggerInfo.Host = parsed.Host
+	bankdocs.SwaggerInfo.Schemes = []string{parsed.Scheme}
+}
+
 // @title           Double-Entry Bank Ledger API
 // @version         1.0
 // @description     Production-grade double-entry accounting ledger
-// @host            localhost:8080
 // @BasePath        /
 // @securityDefinitions.apikey Bearer
 // @in header
@@ -53,8 +66,6 @@ func parseAllowedOrigins() []string {
 		return []string{
 			"https://pehlione-banking.com",
 			"https://www.pehlione-banking.com",
-			"https://pehlione-banking-frontend.onrender.com",
-			"https://banking-go.onrender.com",
 			"http://localhost:8080",
 			"http://127.0.0.1:8080",
 			"http://localhost:3000",
@@ -78,8 +89,6 @@ func parseAllowedOrigins() []string {
 		return []string{
 			"https://pehlione-banking.com",
 			"https://www.pehlione-banking.com",
-			"https://pehlione-banking-frontend.onrender.com",
-			"https://banking-go.onrender.com",
 			"http://localhost:8080",
 			"http://127.0.0.1:8080",
 			"http://localhost:3000",
@@ -210,6 +219,7 @@ func main() {
 	if err := loadEnvironment(); err != nil {
 		zlog.Info().Err(err).Msg("No .env file found; using system environment")
 	}
+	configureSwaggerBaseURL()
 
 	if err := api.InitTokenAuthFromEnv(); err != nil {
 		zlog.Fatal().Err(err).Msg("Failed to initialize JWT auth")

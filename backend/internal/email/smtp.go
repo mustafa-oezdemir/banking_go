@@ -11,6 +11,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 const smtpBoundary = "pehlione-demo-bank-alternative"
@@ -31,13 +33,21 @@ func (s *Service) sendSMTP(ctx context.Context, recipient, subject, htmlBody, te
 	if err != nil {
 		return fmt.Errorf("connect SMTP server: %w", err)
 	}
-	defer connection.Close()
-
 	client, err := smtp.NewClient(connection, s.config.SMTPHost)
 	if err != nil {
+		if closeErr := connection.Close(); closeErr != nil {
+			return fmt.Errorf("create SMTP client: %w (connection close: %v)", err, closeErr)
+		}
 		return fmt.Errorf("create SMTP client: %w", err)
 	}
-	defer client.Close()
+	closedCleanly := false
+	defer func() {
+		if !closedCleanly {
+			if closeErr := client.Close(); closeErr != nil {
+				log.Warn().Err(closeErr).Msg("Failed to close SMTP connection")
+			}
+		}
+	}()
 
 	if s.config.SMTPUser != "" {
 		if s.config.SMTPPassword == "" {
@@ -66,6 +76,7 @@ func (s *Service) sendSMTP(ctx context.Context, recipient, subject, htmlBody, te
 	if err = client.Quit(); err != nil {
 		return fmt.Errorf("close SMTP session: %w", err)
 	}
+	closedCleanly = true
 	return nil
 }
 

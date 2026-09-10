@@ -4,36 +4,18 @@
  */
 
 // API Base URL resolution
-// Uses NEXT_PUBLIC_API_BASE_URL environment variable in production
-// Falls back to same-origin or defaults to Render backend
+// Uses NEXT_PUBLIC_API_BASE_URL when explicitly configured and otherwise
+// stays on the current origin so Next.js rewrites can proxy the API.
 export function getAPIBaseURL(): string {
-  // In production/Vercel, use environment variable (client-side)
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) {
-    return process.env.NEXT_PUBLIC_API_BASE_URL;
-  }
-
-  // If running in Node (SSR), use env var if available
   if (process.env.NEXT_PUBLIC_API_BASE_URL) {
     return process.env.NEXT_PUBLIC_API_BASE_URL;
   }
 
-  // In browser, use same-origin by default
   if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    const isVercelHost = host.endsWith(".vercel.app");
-    const isCustomFrontendDomain =
-      host === "pehlione-banking.com" ||
-      host === "www.pehlione-banking.com";
-
-    if (isVercelHost || isCustomFrontendDomain) {
-      return "https://banking-go.onrender.com";
-    }
-
     return window.location.origin;
   }
 
-  // Server-side fallback
-  return "https://banking-go.onrender.com";
+  return process.env.BACKEND_API_URL || "http://localhost:8383";
 }
 
 export const API_BASE_URL = getAPIBaseURL();
