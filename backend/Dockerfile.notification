@@ -1,0 +1,27 @@
+FROM golang:1.26.8-alpine AS builder
+WORKDIR /src
+
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+COPY backend/. .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/notification-service ./cmd/notification-service
+
+FROM alpine:3.21
+WORKDIR /app
+
+COPY --from=builder /out/notification-service /usr/local/bin/notification-service
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+	TZ=UTC \
+	NOTIFICATION_PORT=8090
+
+RUN adduser -D -u 10002 notification
+USER notification
+
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+	CMD wget -q -O /dev/null http://127.0.0.1:8090/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/notification-service"]

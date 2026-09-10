@@ -185,19 +185,21 @@ yarn build
 
 `POST /payments` requires an `Idempotency-Key`. Reusing a key with the same normalized intent returns the existing order; reusing it with changed payment data returns a conflict. Payment creation alone never books funds—the client must complete VoP, display the summary and explicitly confirm the payment.
 
-### Transactional email
+### Notification service
 
-Password-reset and account-activity messages are delivered through SMTP in local development and the Resend HTTPS API in production. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed. Deposit, withdrawal, internal transfer, SEPA booking and administrator balance adjustments enqueue an email to the address registered by the affected user.
+Password-reset and account-activity messages are sent by an independently health-checkable Go Notification service. Banking sends explicit, token-authenticated HTTP commands after persistence; Notification has no access to Banking tables. It delivers through SMTP in local development and the Resend HTTPS API when configured. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed.
 
 `./start.ps1` configures the backend to send locally through MailHog. Open [localhost:8425](http://localhost:8425) to inspect captured messages; MailHog never forwards them to the public internet.
 
 ```env
+NOTIFICATION_SERVICE_URL=http://localhost:8490
+NOTIFICATION_SERVICE_TOKEN=<independent-random-secret>
 RESEND_API_KEY=re_...
 MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
 FRONTEND_URL=http://localhost:3000
 ```
 
-When `SMTP_HOST` is configured it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. Email delivery is intentionally decoupled from ledger commits: a provider outage is logged but never rolls back or duplicates a financial transaction.
+When `SMTP_HOST` is configured in Notification it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. Delivery is attempted once with bounded timeouts after the Banking commit. A provider/service outage is logged but never rolls back a financial transaction; Phase 3 deliberately makes no durable or exactly-once guarantee.
 
 ## Security model
 
@@ -225,7 +227,7 @@ For a control-by-control source file map and the remaining real-bank requirement
 │   ├── internal/ledger/        Ledger application service, port and pure posting domain
 │   ├── internal/payment/       Payment orchestration, pure lifecycle/intent domain and scheduling
 │   ├── internal/notification/  Provider-neutral notification port
-│   ├── internal/platform/      HTTP, database, email and bootstrap adapters
+│   ├── internal/platform/      Banking HTTP/database client and Notification HTTP/email adapters
 │   ├── internal/architecture/  Enforced module dependency rules
 │   └── postgres/               Migrations, queries and sqlc output
 ├── frontend/

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
@@ -459,11 +460,13 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 }
 
 func (s *Service) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrder) {
-	s.notifier.NotifyActivity(notification.Activity{
+	if err := s.notifier.NotifyActivity(ctx, notification.Activity{
 		UserID: order.OwnerID, AccountID: order.SourceAccountID, Kind: "SEPA_PAYMENT_SENT",
 		Direction: "DEBIT", Amount: order.Amount, Currency: "EUR",
 		Counterparty: order.BeneficiaryName, Reference: order.Purpose.String,
-	})
+	}); err != nil {
+		log.Warn().Err(err).Str("kind", "SEPA_PAYMENT_SENT").Msg("Post-commit notification failed")
+	}
 	if !order.BeneficiaryAccountID.Valid {
 		return
 	}
@@ -471,11 +474,13 @@ func (s *Service) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrd
 	if err != nil || destination.IsSystem || !destination.OwnerID.Valid {
 		return
 	}
-	s.notifier.NotifyActivity(notification.Activity{
+	if err = s.notifier.NotifyActivity(ctx, notification.Activity{
 		UserID: destination.OwnerID.UUID, AccountID: destination.ID, Kind: "SEPA_PAYMENT_RECEIVED",
 		Direction: "CREDIT", Amount: order.Amount, Currency: "EUR",
 		Reference: order.Purpose.String,
-	})
+	}); err != nil {
+		log.Warn().Err(err).Str("kind", "SEPA_PAYMENT_RECEIVED").Msg("Post-commit notification failed")
+	}
 }
 
 func validatePaymentInput(input CreatePaymentInput, now time.Time) (decimal.Decimal, error) {

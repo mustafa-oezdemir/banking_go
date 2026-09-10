@@ -5,10 +5,10 @@ DB_URL_LOCAL=postgresql:
 COMPOSE=docker compose -f ../docker-compose.yml --env-file ../.env
 
 postgres:
-	$(COMPOSE) up -d db
+	$(COMPOSE) up -d postgres
 
 createdb:
-	$(COMPOSE) exec db createdb --username=root --owner=root simple_ledger || true
+	$(COMPOSE) exec postgres createdb --username=root --owner=root simple_ledger || true
 
 migrate-up:
 	migrate -path postgres/migrations/ -database "$(DB_URL_DOCKER)" -verbose up
@@ -47,7 +47,7 @@ coverage:
 # Run tests like CI does (with migrations)
 ci-test:
 	@echo "Setting up test database..."
-	@$(COMPOSE) up -d db
+	@$(COMPOSE) up -d postgres
 	@sleep 2
 	@echo "Running migrations..."
 	@migrate -path postgres/migrations/ -database "$(DB_URL_DOCKER)" up

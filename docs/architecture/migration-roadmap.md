@@ -1,8 +1,8 @@
 # Evolutionary Migration Roadmap
 
-Status: Architecture Phase 2 completed; Phase 3 awaits explicit start
+Status: Architecture Phase 3 completed; Phase 4 explicitly requested next
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 ## Working agreement
 
@@ -17,7 +17,7 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 | 0. Baseline analysis | Completed: current/target architecture, risks, invariants, and migration decision documented | None |
 | 1. Establish domain boundaries | Completed: explicit Identity, Customer/Account, Payment, Ledger, Notification, and Platform modules with an import fitness test | None |
 | 2. Modularize banking backend | Completed: critical domain rules are pure; Ledger, Profile, and Authentication use application ports; payment ACID exception is documented | None |
-| 3. Extract notification service | Notification owns delivery and its private persistence | One new optional service |
+| 3. Extract notification service | Completed: independent HTTP service owns SMTP/Resend delivery and reads no Banking tables | One new service |
 | 4. Introduce async notification events | Durable outbox, broker, inbox/deduplication, retries | Broker only if justified |
 | 5. Extract identity service | Credentials and sessions move behind an Identity contract and private database | One new service |
 | 6. Introduce gateway and service auth | Stable external routing and authenticated internal calls | Gateway only if needed |
@@ -91,27 +91,20 @@ Exit criteria:
 - HTTP and PostgreSQL are adapters at the extracted use-case boundaries;
 - no topology or data ownership change yet.
 
-## Phase 3 — Extract notification service
+## Phase 3 — Extract notification service (completed)
 
 Goal: isolate a failure-tolerant operational capability without risking financial consistency.
 
-Prerequisites:
+Delivered:
 
-- Banking Core emits provider-neutral notification intents after commit;
-- notification payloads contain the minimum required recipient/template data so the new service never queries banking tables;
-- delivery deduplication and observable retry behavior are designed.
+- independent executable/container, health endpoint, configuration, timeouts, structured logs, request IDs, and graceful shutdown;
+- token-authenticated, versioned password-reset and account-activity HTTP commands;
+- explicit recipient/template payloads resolved inside Banking so Notification never queries Banking private tables;
+- SMTP/MailHog and Resend provider ownership moved to Notification;
+- post-commit failure handling and contract/no-retry tests;
+- no broker and no unsafe retry in this phase.
 
-Incremental path:
-
-1. Run Notification as an in-process module behind a transport-neutral port.
-2. Add a separate executable and private notification persistence.
-3. Support dual-run or shadow delivery with delivery disabled on one side.
-4. Switch delivery ownership behind configuration.
-5. Remove direct database access from the old email adapter.
-
-Do not add a broker in this phase unless the durable delivery requirements cannot be met by a simpler database-backed handoff.
-
-Rollback: route intents back to the in-process adapter while retaining deduplication IDs and the notification database.
+Rollback: disable `NOTIFICATION_SERVICE_URL` to use the no-op sender, or restore the prior in-process adapter while keeping financial commit behavior unchanged.
 
 ## Phase 4 — Introduce asynchronous notification events
 
@@ -219,7 +212,7 @@ The following gates apply to every phase:
 | ADR-001 | 0 | Evolutionary migration instead of big-bang rewrite |
 | ADR-002 | 1 | Domain ownership and dependency boundaries |
 | ADR-003 | 2 | Domain/application separation, ports, and the retained payment unit of work |
-| ADR-004 | 3 | Notification extraction and data contract |
+| ADR-004 | 3 | Notification extraction, private HTTP contract, and failure semantics |
 | ADR-005 | 4 | Outbox, broker choice, delivery semantics, and deduplication |
 | ADR-006 | 5 | Identity data split, token authority, and migration |
 | ADR-007 | 6 | Gateway and service authentication |

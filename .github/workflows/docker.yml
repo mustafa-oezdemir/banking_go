@@ -25,6 +25,9 @@ jobs:
           - service: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
+          - service: notification
+            context: .
+            dockerfile: backend/Dockerfile.notification
     permissions:
       contents: read
       packages: write

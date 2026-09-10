@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -87,6 +88,12 @@ func (h *Handler) SetNotificationSender(sender notification.Sender) {
 	}
 }
 
+func (h *Handler) notifyActivity(ctx context.Context, activity notification.Activity) {
+	if err := h.notifier.NotifyActivity(ctx, activity); err != nil {
+		log.Warn().Err(err).Str("kind", activity.Kind).Msg("Post-commit notification failed")
+	}
+}
+
 // Register godoc
 // @Summary      Register a new user
 // @Description  Creates a user, a default EUR account, and a fictional 500 EUR opening balance; returns user details and a JWT token
@@ -149,7 +156,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	SetSessionCookie(w, r, token)
-	h.notifier.NotifyActivity(notification.Activity{
+	h.notifyActivity(r.Context(), notification.Activity{
 		UserID: customer.User.ID, AccountID: customer.Account.ID, Kind: "REGISTRATION_CREDIT",
 		Direction: "CREDIT", Amount: signupOpeningBalance, Currency: "EUR", Reference: "Startguthaben",
 	})
@@ -652,7 +659,7 @@ func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, err.Error())
 		return
 	}
-	h.notifier.NotifyActivity(notification.Activity{
+	h.notifyActivity(r.Context(), notification.Activity{
 		UserID: userID, AccountID: accountID, Kind: "DEPOSIT",
 		Direction: "CREDIT", Amount: amount, Currency: acc.Currency,
 	})
@@ -735,7 +742,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		respondError(w, code, err.Error())
 		return
 	}
-	h.notifier.NotifyActivity(notification.Activity{
+	h.notifyActivity(r.Context(), notification.Activity{
 		UserID: userID, AccountID: accountID, Kind: "WITHDRAWAL",
 		Direction: "DEBIT", Amount: amount, Currency: acc.Currency,
 	})
@@ -869,13 +876,13 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.notifier.NotifyActivity(notification.Activity{
+	h.notifyActivity(r.Context(), notification.Activity{
 		UserID: userID, AccountID: fromID, Kind: "TRANSFER_SENT",
 		Direction: "DEBIT", Amount: amount, Currency: fromAcc.Currency,
 	})
 	toAcc, lookupErr := h.store.GetAccount(r.Context(), toID)
 	if lookupErr == nil && !toAcc.IsSystem && toAcc.OwnerID.Valid {
-		h.notifier.NotifyActivity(notification.Activity{
+		h.notifyActivity(r.Context(), notification.Activity{
 			UserID: toAcc.OwnerID.UUID, AccountID: toID, Kind: "TRANSFER_RECEIVED",
 			Direction: "CREDIT", Amount: amount, Currency: toAcc.Currency,
 		})

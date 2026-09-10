@@ -20,6 +20,7 @@ import (
 
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationclient"
 )
 
 func main() {
@@ -50,7 +51,14 @@ func main() {
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	paymentService := payment.NewService(db.NewStore(connection), nil)
+	store := db.NewStore(connection)
+	paymentService := payment.NewService(store, nil)
+	notificationClient, err := notificationclient.NewFromEnvironment(store)
+	if err != nil {
+		log.Error().Err(err).Msg("Worker notification client configuration is invalid")
+		return
+	}
+	paymentService.SetNotificationSender(notificationClient)
 	run := func() {
 		processed, runErr := paymentService.RunDuePayments(ctx, 50)
 		if runErr != nil {

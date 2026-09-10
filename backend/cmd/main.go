@@ -28,8 +28,8 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/bootstrap"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
-	emailservice "github.com/mustafa-oezdemir/banking_go/internal/platform/email"
 	api "github.com/mustafa-oezdemir/banking_go/internal/platform/httpapi"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationclient"
 )
 
 func initLogger() {
@@ -241,8 +241,8 @@ func main() {
 
 	pingCtx, pingCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer pingCancel()
-	if err := dbConn.PingContext(pingCtx); err != nil {
-		zlog.Fatal().Err(err).Msg("Failed to connect to DB")
+	if pingErr := dbConn.PingContext(pingCtx); pingErr != nil {
+		zlog.Fatal().Err(pingErr).Msg("Failed to connect to DB")
 	}
 	zlog.Info().Msg("Database connectivity verified")
 
@@ -273,17 +273,20 @@ func main() {
 		seedCancel()
 		zlog.Info().Msg("Fictional demo seed is ready")
 	}
-	emailSvc := emailservice.NewFromEnvironment(store)
-	paymentSvc.SetNotificationSender(emailSvc)
-	if emailSvc.Enabled() {
-		zlog.Info().Str("provider", emailSvc.Provider()).Msg("Transactional email delivery enabled")
+	notificationClient, err := notificationclient.NewFromEnvironment(store)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Notification service client configuration is invalid")
+	}
+	paymentSvc.SetNotificationSender(notificationClient)
+	if notificationClient.Enabled() {
+		zlog.Info().Msg("Remote transactional notification delivery enabled")
 	} else {
-		zlog.Warn().Msg("Transactional email disabled: configure SMTP_HOST or RESEND_API_KEY")
+		zlog.Warn().Msg("Transactional notifications disabled: configure NOTIFICATION_SERVICE_URL and token")
 	}
 
 	// Wire HTTP handlers with service and persistence dependencies.
 	h := api.NewHandlerWithPayments(ledgerSvc, paymentSvc, store)
-	h.SetNotificationSender(emailSvc)
+	h.SetNotificationSender(notificationClient)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

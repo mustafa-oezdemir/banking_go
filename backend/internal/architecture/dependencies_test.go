@@ -46,9 +46,7 @@ var allowedProjectImports = map[string]map[string]bool{
 		"postgres/sqlc",
 	),
 	"platform/email": allowed(
-		"internal/account",
 		"internal/notification",
-		"internal/platform/database",
 	),
 	"platform/httpapi": allowed(
 		"internal/account",
@@ -58,6 +56,14 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/payment",
 		"internal/platform/database",
 		"postgres/sqlc",
+	),
+	"platform/notificationapi": allowed(
+		"internal/notification",
+	),
+	"platform/notificationclient": allowed(
+		"internal/account",
+		"internal/notification",
+		"internal/platform/database",
 	),
 }
 
@@ -114,6 +120,7 @@ func TestInternalPackageRootsAreIntentional(t *testing.T) {
 	})
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
 		"bootstrap": true, "database": true, "email": true, "httpapi": true,
+		"notificationapi": true, "notificationclient": true,
 	})
 }
 
@@ -155,6 +162,34 @@ func TestCoreDomainPackagesAreInfrastructureFree(t *testing.T) {
 						t.Errorf("domain %s imports infrastructure %q", domainPath, importPath)
 					}
 				}
+			}
+		}
+	}
+}
+
+func TestNotificationExecutableCannotAccessBankingPersistence(t *testing.T) {
+	root := filepath.Join("..", "..", "cmd", "notification-service")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read notification executable: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			t.Fatalf("parse notification executable %s: %v", path, parseErr)
+		}
+		for _, imported := range parsed.Imports {
+			importPath, unquoteErr := strconv.Unquote(imported.Path.Value)
+			if unquoteErr != nil {
+				t.Fatalf("read import in %s: %v", path, unquoteErr)
+			}
+			if importPath == "database/sql" || importPath == modulePath+"internal/platform/database" ||
+				importPath == modulePath+"postgres/sqlc" || importPath == "github.com/lib/pq" {
+				t.Errorf("notification executable imports Banking persistence %q", importPath)
 			}
 		}
 	}

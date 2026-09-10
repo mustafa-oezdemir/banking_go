@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 )
 
 func TestSendPasswordResetUsesResendAPI(t *testing.T) {
@@ -37,7 +39,7 @@ func TestSendPasswordResetUsesResendAPI(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	service := NewService(nil, Config{
+	service := NewService(Config{
 		APIKey: "re_test_secret", From: "Pehlione <banking@pehlione.com>",
 		FrontendURL: "https://bank.example", Endpoint: server.URL,
 	}, server.Client())
@@ -63,12 +65,42 @@ func TestSendPasswordResetRejectsMissingResendMessageID(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	service := NewService(nil, Config{
+	service := NewService(Config{
 		APIKey: "re_test_secret", From: "Pehlione <banking@pehlione.com>",
 		FrontendURL: "https://bank.example", Endpoint: server.URL,
 	}, server.Client())
 	err := service.SendPasswordReset(context.Background(), "owner@example.com", "Ada Beispiel", "safe_token")
 	require.EqualError(t, err, "resend returned an empty email ID")
+}
+
+func TestDeliverActivityUsesOnlyExplicitCommandData(t *testing.T) {
+	t.Parallel()
+	var delivered struct {
+		HTML string   `json:"html"`
+		To   []string `json:"to"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&delivered))
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"id":"email_activity_123"}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+	service := NewService(Config{
+		APIKey: "re_test_secret", From: "Pehlione <banking@pehlione.com>",
+		FrontendURL: "https://bank.example", Endpoint: server.URL,
+	}, server.Client())
+
+	err := service.DeliverActivity(t.Context(), notification.ActivityCommand{
+		RecipientEmail: "owner@example.com", RecipientName: "Ada Beispiel", AccountName: "Girokonto",
+		MaskedIBAN: "DE89 •••• •••• •••• ••00", Balance: "87.66", Kind: "TRANSFER_SENT",
+		Direction: "DEBIT", Amount: "12.34", Currency: "EUR", Reference: "Miete",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"owner@example.com"}, delivered.To)
+	assert.Contains(t, delivered.HTML, "DE89 •••• •••• •••• ••00")
+	assert.Contains(t, delivered.HTML, "87,66 EUR")
 }
 
 func TestResendBaseURLAcceptsLegacyEmailsEndpoint(t *testing.T) {
@@ -79,7 +111,7 @@ func TestResendBaseURLAcceptsLegacyEmailsEndpoint(t *testing.T) {
 
 func TestDisabledServiceRejectsPasswordResetDelivery(t *testing.T) {
 	t.Parallel()
-	service := NewService(nil, Config{}, nil)
+	service := NewService(Config{}, nil)
 	assert.False(t, service.Enabled())
 	assert.Error(t, service.SendPasswordReset(context.Background(), "owner@example.com", "Owner", "token"))
 }

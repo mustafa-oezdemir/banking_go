@@ -1,5 +1,5 @@
 services:
-  db:
+  postgres:
     image: postgres:16
     restart: always
     environment:
@@ -23,7 +23,35 @@ services:
     ports:
       - "${MAILHOG_HTTP_PORT:-8425}:8025"
 
-  app:
+  notification-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.notification
+    restart: unless-stopped
+    ports:
+      - "${NOTIFICATION_HTTP_PORT:-8490}:8090"
+    environment:
+      NOTIFICATION_PORT: 8090
+      NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
+      NOTIFICATION_DELIVERY_TIMEOUT: ${NOTIFICATION_DELIVERY_TIMEOUT:-12s}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-Pehlione DemoBank <banking@pehlione.com>}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  banking-api:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -32,7 +60,7 @@ services:
       # BACKEND_PORT is public; PORT is the backend's container listening port.
       - "${BACKEND_PORT:-8383}:${PORT:-8080}"
     environment:
-      DB_HOST: db
+      DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-simple_ledger}
       DB_USER: ${DB_USER:-root}
@@ -46,20 +74,15 @@ services:
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
       ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      MAIL_FROM: ${MAIL_FROM:-Pehlione DemoBank <banking@pehlione.com>}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      NOTIFICATION_SERVICE_URL: http://notification-service:8090
+      NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
       SWAGGER_BASE_URL: ${SWAGGER_BASE_URL:-}
       PORT: ${PORT:-8080}
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
-      mailhog:
-        condition: service_started
+      notification-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:${PORT:-8080}/health || exit 1"]
       interval: 5s
@@ -71,15 +94,15 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_API_URL: http://app:${PORT:-8080}
+        BACKEND_API_URL: http://banking-api:${PORT:-8080}
     restart: unless-stopped
     environment:
-      BACKEND_API_URL: http://app:${PORT:-8080}
+      BACKEND_API_URL: http://banking-api:${PORT:-8080}
       NEXT_TELEMETRY_DISABLED: 1
     ports:
       - "3000:3000"
     depends_on:
-      app:
+      banking-api:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000 || exit 1"]

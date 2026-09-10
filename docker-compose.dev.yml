@@ -5,11 +5,11 @@ services:
     volumes:
       - ./backend/postgres/migrations:/migrations:ro
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     command:
       - -path=/migrations
-      - -database=postgresql://${DB_USER:-root}:${DB_PASSWORD:-secret}@db:5432/${DB_NAME:-simple_ledger}?sslmode=disable
+      - -database=postgresql://${DB_USER:-root}:${DB_PASSWORD:-secret}@postgres:5432/${DB_NAME:-simple_ledger}?sslmode=disable
       - up
 
   backend-dev:
@@ -21,7 +21,7 @@ services:
     volumes:
       - ./backend/bin/linux/ledger:/usr/local/bin/ledger:ro
     environment:
-      DB_HOST: db
+      DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-simple_ledger}
       DB_USER: ${DB_USER:-root}
@@ -35,12 +35,8 @@ services:
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
       ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      MAIL_FROM: ${MAIL_FROM:-Pehlione DemoBank <banking@pehlione.com>}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      NOTIFICATION_SERVICE_URL: http://notification-service:8090
+      NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
       SWAGGER_BASE_URL: ${SWAGGER_BASE_URL:-http://localhost:${BACKEND_PORT:-8383}}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       PORT: ${PORT:-8080}
@@ -48,10 +44,10 @@ services:
       # Keep clear of common Hyper-V/WSL exclusions and desktop app ports.
       - "${BACKEND_PORT:-8383}:${PORT:-8080}"
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
-      mailhog:
-        condition: service_started
+      notification-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:${PORT:-8080}/health || exit 1"]
       interval: 5s

@@ -34,3 +34,18 @@ func (Build) Linux() error {
 	}
 	return sh.RunWithV(env, "go", "build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, "./cmd")
 }
+
+// NotificationLinux builds the standalone Notification service for linux/amd64.
+func (Build) NotificationLinux() error {
+	outputPath := filepath.Join("bin", "linux", "notification-service")
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	env := map[string]string{
+		"CGO_ENABLED": "0",
+		"GOOS":        "linux",
+		"GOARCH":      "amd64",
+	}
+	return sh.RunWithV(env, "go", "build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, "./cmd/notification-service")
+}

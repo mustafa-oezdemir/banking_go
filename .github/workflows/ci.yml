@@ -71,13 +71,17 @@ jobs:
 
       - name: Build backend binary
         working-directory: backend
-        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o ledger ./cmd/main.go
+        run: |
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o ledger ./cmd/main.go
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o notification-service ./cmd/notification-service
 
       - name: Upload backend artifact
         uses: actions/upload-artifact@v6
         with:
           name: ledger-linux-amd64
-          path: backend/ledger
+          path: |
+            backend/ledger
+            backend/notification-service
           retention-days: 7
 
   frontend-check:

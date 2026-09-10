@@ -3,8 +3,10 @@ package payment
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,8 +15,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
+
+type failingNotificationSender struct {
+	activityCalls atomic.Int32
+}
+
+func (*failingNotificationSender) SendPasswordReset(context.Context, string, string, string) error {
+	return errors.New("notification service unavailable")
+}
+
+func (sender *failingNotificationSender) NotifyActivity(context.Context, notification.Activity) error {
+	sender.activityCalls.Add(1)
+	return errors.New("notification service unavailable")
+}
+
+func (*failingNotificationSender) Enabled() bool { return true }
 
 func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	ledger := setupTestLedger(t)
@@ -35,6 +53,8 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 
 	destinationIBAN := mustDemoIBAN(t)
 	service := NewService(ledger.store, nil)
+	failingNotifications := &failingNotificationSender{}
+	service.SetNotificationSender(failingNotifications)
 	input := CreatePaymentInput{
 		OwnerID: owner.ID, SourceAccountID: source.ID, BeneficiaryName: "External Demo",
 		BeneficiaryIBAN: destinationIBAN, Amount: "12.34", TransferType: PaymentStandard,
@@ -75,6 +95,8 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	booked, err := service.GetPayment(ctx, owner.ID, created.Order.ID)
 	require.NoError(t, err)
 	require.Equal(t, PaymentBooked, booked.Status)
+	assert.EqualValues(t, 1, failingNotifications.activityCalls.Load(),
+		"provider failure must not roll back an already booked payment")
 	require.True(t, booked.LedgerTransactionID.Valid)
 	entries, err := ledger.store.ListEntriesByTransaction(ctx, booked.LedgerTransactionID.UUID)
 	require.NoError(t, err)

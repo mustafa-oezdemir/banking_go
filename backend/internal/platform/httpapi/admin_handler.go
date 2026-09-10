@@ -219,7 +219,7 @@ func (h *Handler) AdminAdjustAccountBalance(w http.ResponseWriter, r *http.Reque
 		if operation == "DEPOSIT" {
 			direction = "CREDIT"
 		}
-		h.notifier.NotifyActivity(notification.Activity{
+		h.notifyActivity(r.Context(), notification.Activity{
 			UserID: account.OwnerID.UUID, AccountID: account.ID, Kind: "ADMIN_" + operation,
 			Direction: direction, Amount: amount.StringFixed(2), Currency: account.Currency,
 			Reference: "Administrative Kontobuchung",

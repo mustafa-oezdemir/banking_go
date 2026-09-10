@@ -9,7 +9,7 @@ import (
 
 func TestSMTPProviderTakesPrecedenceOverResend(t *testing.T) {
 	t.Parallel()
-	service := NewService(nil, Config{
+	service := NewService(Config{
 		APIKey: "re_test", From: "Pehlione <banking@example.invalid>",
 		FrontendURL: "http://localhost:3000", SMTPHost: "mailhog", SMTPPort: "1025",
 	}, nil)

@@ -69,12 +69,45 @@ if (-not $jwtMatch.Success -or $jwtMatch.Groups[1].Value.Trim().Length -lt 32) {
     Write-Host "Guvenli JWT_SECRET otomatik olusturuldu." -ForegroundColor Yellow
 }
 
-Write-Host "PostgreSQL ve MailHog bagimliliklari baslatiliyor..." -ForegroundColor Cyan
-& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 120 db mailhog
+$notificationTokenMatch = [regex]::Match($envContent, "(?m)^NOTIFICATION_SERVICE_TOKEN=(.*)$")
+if (-not $notificationTokenMatch.Success -or
+    $notificationTokenMatch.Groups[1].Value.Trim().Length -lt 32 -or
+    $notificationTokenMatch.Groups[1].Value.Contains("replace-with")) {
+    $randomBytes = New-Object byte[] 32
+    $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $randomGenerator.GetBytes($randomBytes)
+        $notificationToken = [Convert]::ToBase64String($randomBytes)
+    }
+    finally {
+        $randomGenerator.Dispose()
+    }
+
+    $notificationTokenLine = "NOTIFICATION_SERVICE_TOKEN=$notificationToken"
+    if ($notificationTokenMatch.Success) {
+        $envContent = [regex]::Replace(
+            $envContent,
+            "(?m)^NOTIFICATION_SERVICE_TOKEN=.*$",
+            [Text.RegularExpressions.MatchEvaluator]{ param($match) $notificationTokenLine },
+            1
+        )
+    }
+    else {
+        if ($envContent.Length -gt 0 -and -not $envContent.EndsWith("`n")) {
+            $envContent += [Environment]::NewLine
+        }
+        $envContent += $notificationTokenLine + [Environment]::NewLine
+    }
+    [IO.File]::WriteAllText($envPath, $envContent, (New-Object Text.UTF8Encoding($false)))
+    Write-Host "Guvenli NOTIFICATION_SERVICE_TOKEN otomatik olusturuldu." -ForegroundColor Yellow
+}
+
+Write-Host "PostgreSQL, MailHog ve Notification servisi baslatiliyor..." -ForegroundColor Cyan
+& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120 postgres mailhog notification-service
 if ($LASTEXITCODE -ne 0) {
     & docker compose ps -a
     & docker compose logs --tail 80
-    throw "PostgreSQL baslatilamadi. Yukaridaki Docker loglarini kontrol edin."
+    throw "Gelistirme bagimliliklari baslatilamadi. Yukaridaki Docker loglarini kontrol edin."
 }
 
 if (-not $NoBuild) {
@@ -137,6 +170,7 @@ Write-Host "Frontend : http://localhost:3000"
 Write-Host "Backend  : http://localhost:$backendDevPort"
 Write-Host "Swagger  : http://localhost:$backendDevPort/swagger/index.html"
 Write-Host "MailHog  : http://localhost:8425"
+Write-Host "Notify   : http://localhost:8490/health"
 Write-Host "Database : localhost:5433"
 Write-Host "Durdurmak icin frontend terminalinde Ctrl+C, ardindan: .\start.ps1 -Stop"
 Write-Host ""
