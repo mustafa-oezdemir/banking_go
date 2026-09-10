@@ -187,19 +187,22 @@ yarn build
 
 ### Notification service
 
-Password-reset and account-activity messages are sent by an independently health-checkable Go Notification service. Banking sends explicit, token-authenticated HTTP commands after persistence; Notification has no access to Banking tables. It delivers through SMTP in local development and the Resend HTTPS API when configured. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed.
+Password-reset messages use an explicit, token-authenticated HTTP command. Committed payment activity is delivered asynchronously: Banking writes a versioned event to its PostgreSQL transactional outbox, then a publisher sends it to RabbitMQ; Notification consumes it and delivers through SMTP in local development or the Resend HTTPS API when configured. Notification never queries Banking tables; it owns only a processed-event ID store for consumer idempotency. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed.
 
 `./start.ps1` configures the backend to send locally through MailHog. Open [localhost:8425](http://localhost:8425) to inspect captured messages; MailHog never forwards them to the public internet.
 
 ```env
 NOTIFICATION_SERVICE_URL=http://localhost:8490
 NOTIFICATION_SERVICE_TOKEN=<independent-random-secret>
+RABBITMQ_URL=amqp://<user>:<url-encoded-password>@localhost:5672/
+RABBITMQ_RETRY_DELAY=5s
+RABBITMQ_MAX_RETRIES=3
 RESEND_API_KEY=re_...
 MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
 FRONTEND_URL=http://localhost:3000
 ```
 
-When `SMTP_HOST` is configured in Notification it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. Delivery is attempted once with bounded timeouts after the Banking commit. A provider/service outage is logged but never rolls back a financial transaction; Phase 3 deliberately makes no durable or exactly-once guarantee.
+When `SMTP_HOST` is configured in Notification it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. RabbitMQ retry queues handle transient delivery failures, while malformed and exhausted events go to `notification.payment.dlq`. Financial commits never wait for RabbitMQ or the provider. Delivery is at least once—not exactly once; event IDs suppress normal duplicate broker deliveries, but a provider-accepted email immediately before a process crash may still be resent.
 
 ## Security model
 
@@ -227,7 +230,7 @@ For a control-by-control source file map and the remaining real-bank requirement
 │   ├── internal/ledger/        Ledger application service, port and pure posting domain
 │   ├── internal/payment/       Payment orchestration, pure lifecycle/intent domain and scheduling
 │   ├── internal/notification/  Provider-neutral notification port
-│   ├── internal/platform/      Banking HTTP/database client and Notification HTTP/email adapters
+│   ├── internal/platform/      HTTP/database, outbox, RabbitMQ and Notification adapters
 │   ├── internal/architecture/  Enforced module dependency rules
 │   └── postgres/               Migrations, queries and sqlc output
 ├── frontend/

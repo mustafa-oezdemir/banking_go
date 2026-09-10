@@ -1,16 +1,16 @@
 # Current Architecture
 
-Status: Architecture Phase 3 with an extracted Notification service
+Status: Architecture Phase 4 with RabbitMQ and a transactional outbox
 
 Last verified: 2026-09-11
 
-Scope: Phase 3 completion state
+Scope: Phase 4 completion state
 
 ## Purpose and system boundary
 
 Pehlione DemoBank is a learning and portfolio application. It simulates EUR accounts, SEPA-style payments, scheduled payments, and double-entry bookkeeping. It does not connect to a bank, payment rail, or real-money provider.
 
-The Banking Core remains a modular monolith: a Next.js frontend and one Go banking backend share PostgreSQL, with an optional worker over the same code and schema. Notification is the first separately deployed Go service and owns email-provider delivery without access to Banking persistence.
+The Banking Core remains a modular monolith: a Next.js frontend and one Go banking backend share PostgreSQL, with an optional worker over the same code and schema. Notification is separately deployed, owns email-provider delivery and a processed-event inbox, and never queries Banking-owned tables.
 
 ## C4 level 1: system context
 
@@ -37,6 +37,7 @@ flowchart LR
     Scheduler["In-process scheduler"]
     Worker["Optional Go payment worker"]
     DB[("PostgreSQL 16\none shared schema")]
+    Rabbit["RabbitMQ\ndurable event broker"]
     MailHog["MailHog SMTP/UI"]
     Resend["Resend API"]
 
@@ -45,13 +46,16 @@ flowchart LR
     API --> DB
     Scheduler --> DB
     Worker -. "alternative/optional polling" .-> DB
-    API -->|"Private authenticated HTTP\nexplicit commands"| Notification
+    API -->|"Password-reset HTTP command"| Notification
+    API -->|"Post-commit outbox publisher"| Rabbit
+    Worker -->|"Post-commit outbox publisher"| Rabbit
+    Rabbit -->|"payment.*.v1"| Notification
     Notification -->|"SMTP"| MailHog
     Notification -. "HTTPS" .-> Resend
     API -->|"SSE refresh signals"| Browser
 ```
 
-Docker Compose starts `postgres`, `mailhog`, `notification-service`, `banking-api`, and `frontend`. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled. `cmd/worker` is built into the backend image but is not a default Compose service. `docker-compose.dev.yml` adds a migration profile and a container that runs the Mage-built Linux Banking API binary.
+Docker Compose starts `postgres`, `rabbitmq`, `mailhog`, `notification-service`, `banking-api`, and `frontend`. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled. `cmd/worker` is built into the backend image but is not a default Compose service. `docker-compose.dev.yml` adds a migration profile and a container that runs the Mage-built Linux Banking API binary.
 
 ## C4 level 3: backend components
 
@@ -72,6 +76,9 @@ flowchart TB
     NotificationClient["internal/platform/notificationclient\nBanking HTTP client and private-data mapping"]
     NotificationAPI["internal/platform/notificationapi\nprivate HTTP contract"]
     Email["internal/platform/email\nSMTP and Resend delivery"]
+    Outbox["internal/platform/outbox\ntransactional event persistence/polling"]
+    Rabbit["internal/platform/rabbitmq\npublisher and idempotent consumer"]
+    Inbox["internal/platform/notificationstore\nprocessed event IDs"]
     DBStore["internal/platform/database\nPostgreSQL repositories and unit of work"]
     SQLC["postgres/sqlc\ngenerated persistence API"]
     PG[("PostgreSQL")]
@@ -84,8 +91,12 @@ flowchart TB
     Main --> Bootstrap
     Main --> DBStore
     Main --> NotificationClient
+    Main --> Outbox
+    Main --> Rabbit
     NotificationMain --> NotificationAPI
     NotificationMain --> Email
+    NotificationMain --> Rabbit
+    NotificationMain --> Inbox
     Worker --> Payment
     Worker --> DBStore
     HTTP --> Identity
@@ -102,6 +113,7 @@ flowchart TB
     Payment --> LedgerDomain
     Payment --> PaymentDomain
     Payment --> Notify
+    Payment --> Outbox
     Payment --> DBStore
     Payment --> SQLC
     NotificationClient --> Notify
@@ -113,6 +125,8 @@ flowchart TB
     Bootstrap --> Payment
     Bootstrap --> DBStore
     Email --> Notify
+    Rabbit --> Notify
+    Rabbit --> Inbox
     DBStore --> SQLC
     DBStore --> Identity
     DBStore --> Account
@@ -121,14 +135,14 @@ flowchart TB
     SQLC --> PG
 ```
 
-The Banking-side Notification client resolves recipient and masked account display data from Banking-owned persistence after commit, then sends an explicit command. The Notification API and email adapter have no database dependency. Architecture tests guard the service executable from Banking persistence imports as well as the Phase 2 module rules.
+The Banking-side Notification client remains for password reset. Payment writes fully resolved, masked account-activity payloads into the same transaction as its booking/failure state; the outbox publisher sends them only after commit. Notification persists only processed event IDs in its own schema and has no access path to Banking persistence. Architecture tests guard the service executable from Banking persistence imports as well as the Phase 2 module rules.
 
 ## Executables and entry points
 
 | Executable | Source | Responsibility |
 | --- | --- | --- |
 | HTTP API | `backend/cmd/main.go` | Loads environment, connects to PostgreSQL, constructs services, seeds optional demo/admin data, registers Chi routes, starts the in-process scheduler, and serves HTTP. |
-| Notification service | `backend/cmd/notification-service/main.go` | Loads only service/provider configuration, exposes health and private command routes, delivers through SMTP or Resend, and shuts down gracefully. |
+| Notification service | `backend/cmd/notification-service/main.go` | Loads provider, RabbitMQ, and Notification inbox configuration; consumes payment events idempotently, exposes health/private reset routes, and delivers through SMTP or Resend. |
 | Payment worker | `backend/cmd/worker/main.go` | Connects to the same PostgreSQL schema and calls `payment.Service.RunDuePayments` every 15 seconds. |
 | Linux development binaries | `backend/Magefile.go` | Builds the Banking API and standalone Notification linux/amd64 binaries. |
 
@@ -162,8 +176,10 @@ All capabilities share one PostgreSQL schema.
 | Ledger | `entries` | Ledger and payment services write; account/payment APIs read |
 | Payments | `payment_orders`, `standing_orders`, `beneficiaries` | Payment service, payment handlers, worker, seeds |
 | Audit | `audit_events`, `admin_audit_events` | Payment/profile/admin flows; SSE reads customer audit events |
+| Outbox | `outbox_events` | Payment transaction writes; Banking API/worker publisher leases and marks publication |
+| Notification inbox | `notification.processed_events` | Notification service only; event-ID claims and completed-delivery records |
 
-There is no database ownership boundary between Banking modules. Cross-capability joins are common and intentional inside Banking, for example payment booking locks accounts and writes entries, and VoP joins accounts to users. Notification has no database connection; Banking resolves the minimum delivery payload before crossing the HTTP boundary.
+There is no database ownership boundary between Banking modules. Cross-capability joins are common and intentional inside Banking, for example payment booking locks accounts and writes entries, and VoP joins accounts to users. Notification uses the shared PostgreSQL instance only for its owned `notification.processed_events` table; Banking resolves the minimum delivery payload before the asynchronous boundary.
 
 ## Financial invariants
 
@@ -199,7 +215,7 @@ The database enforces entry shape, status vocabularies, unique IBANs, and append
 
 Some lifecycle writes are not a single atomic unit: initial payment creation and its audit insert, payment cancellation and its audit insert, and standing-order creation and its audit insert use separate transactions. A failure in the second step can return an error after the primary record has already committed.
 
-Notification delivery is post-commit by design and never participates in a financial transaction.
+Notification delivery is post-commit by design and never participates in a financial transaction. The outbox record does participate in the financial transaction, so committed payment facts remain publishable through broker downtime.
 
 ## Idempotency and duplicate safety
 
@@ -225,9 +241,9 @@ Credential normalization, password policy, hashing, verification, and login orch
 
 ## Notifications and live updates
 
-`internal/notification` defines Banking intents, explicit versioned command DTOs, validation, and provider ports. `internal/platform/notificationclient` implements the Banking sender through authenticated HTTP. `internal/platform/notificationapi` validates the private service API, and `internal/platform/email` delivers fully resolved commands through SMTP or Resend.
+`internal/notification` defines explicit versioned commands, event envelopes, validation, and provider ports. `internal/platform/notificationclient` implements password-reset HTTP delivery. `internal/platform/outbox` persists committed payment events and `internal/platform/rabbitmq` publishes/consumes them. `internal/platform/notificationstore` owns event-ID deduplication, while `internal/platform/email` delivers fully resolved commands through SMTP or Resend.
 
-Both command types are attempted synchronously with bounded timeouts after persistence. Activity failures are logged and ignored after financial commit. Phase 3 performs no automatic retry because a provider may accept a message before a network error is observed; there is no durable delivery or exactly-once claim. Correlation travels through `X-Request-ID`. Commands contain masked IBANs and required recipient/template data, while logs exclude bodies, addresses, reset tokens, balances, and full identifiers.
+Password reset remains a bounded synchronous command. Payment activity is written to the outbox with its committed payment transaction, published with RabbitMQ confirms, and consumed with manual ACK after its event ID is recorded. Transient delivery failure goes to a delayed retry queue; invalid/exhausted messages go to a durable dead-letter queue. This is at least once, never exactly once. Correlation travels in the event envelope. Commands contain masked IBANs and required recipient/template data, while logs exclude bodies, addresses, reset tokens, balances, and full identifiers.
 
 `EventHub` is an in-process, owner-scoped SSE wake-up mechanism. Durable customer event history is read from `audit_events`, but wake-up signals are instance-local. The frontend falls back to polling every 15 seconds when SSE fails.
 
@@ -257,7 +273,7 @@ GitHub Actions provides:
 | Payment application retains concrete persistence | `internal/payment` owns a serializable cross-table booking workflow over `*db.Store` | ADR-003 preserves atomic locking/booking semantics and forbids expanding this exception without a useful unit-of-work contract. |
 | HTTP layer still contains some simple orchestration | Account creation, beneficiary operations, role/session checks, and reset-token transport remain in `platform/httpapi` | Extract only when a cohesive use case or alternate adapter justifies a boundary; do not create pass-through interfaces. |
 | Concrete store is shared inside Banking | HTTP, ledger, payment, bootstrap, and the Banking-side Notification client use `*db.Store` | Notification itself is isolated, but Banking module ownership still depends on code discipline. |
-| Best-effort synchronous notification | Phase 3 makes one bounded HTTP/provider attempt after commit | Downtime or ambiguous provider responses can lose an email; Phase 4 adds outbox/event durability and deduplication. |
+| At-least-once notification | Outbox publisher, RabbitMQ retry queue, processed-event claims | Broker downtime is durable, but a crash after external provider acceptance can still duplicate an email; exactly-once is not claimed. |
 | Shared service token | Banking and Notification share one bearer secret | Rotation requires coordination; keep it independent from JWT/provider secrets and outside Git. |
 | Instance-local SSE | `EventHub` is process memory | Clients connected to another replica may miss immediate wake-up signals. |
 | Partial lifecycle audit atomicity | Create/cancel flows sometimes audit in a second transaction | API error and persisted state can disagree. |
@@ -266,6 +282,6 @@ GitHub Actions provides:
 | Database-level balance invariant is incomplete | DB checks individual entries but not transaction-wide debit=credit | A future writer bypassing services could create an unbalanced transaction. |
 | API contract drift risk | Routes, handwritten frontend endpoints, Swagger, and handlers are maintained separately | Dormant or missing routes can remain unnoticed without contract tests. |
 
-## Phase 3 conclusion
+## Phase 4 conclusion
 
-Notification is now a real service boundary with an explicit private contract, independent runtime/configuration/health, data minimization, bounded calls, and no Banking database access. Account, Payment, and Ledger remain one process and serializable PostgreSQL consistency boundary. Provider failure cannot roll back committed money. Durable asynchronous delivery, at-least-once handling, deduplication, and RabbitMQ belong to the explicitly requested Phase 4.
+Notification is a real service boundary with an explicit private contract, independent runtime/configuration/health, data minimization, bounded calls, and no Banking-table access. Account, Payment, and Ledger remain one process and serializable PostgreSQL consistency boundary. The Phase 4 outbox removes the database-to-broker dual write; RabbitMQ downtime delays rather than rolls back notification delivery. Processing is explicitly at least once, with idempotent consumer storage and poison-message handling.

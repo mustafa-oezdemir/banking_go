@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Architecture Phase 3 completed; Phase 4 explicitly requested next
+Status: Architecture Phase 4 completed
 
 Last updated: 2026-09-11
 
@@ -106,24 +106,24 @@ Delivered:
 
 Rollback: disable `NOTIFICATION_SERVICE_URL` to use the no-op sender, or restore the prior in-process adapter while keeping financial commit behavior unchanged.
 
-## Phase 4 — Introduce asynchronous notification events
+## Phase 4 — Introduce asynchronous notification events (completed)
 
 Goal: guarantee that committed banking facts can be delivered at least once without coupling transactions to provider availability.
 
-Planned work:
+Delivered:
 
-- add a transactional outbox to Banking Core;
-- publish versioned events through an adapter;
-- introduce a broker only after choosing it in an ADR from measured needs;
-- add a Notification inbox/unique event constraint;
-- bound retries and provide dead-letter inspection/replay;
-- test duplicate, reordered, delayed, and unavailable-consumer cases.
+- transactional outbox rows in the same serializable transaction as payment, ledger, and balance writes;
+- RabbitMQ durable topic exchange with persistent publisher-confirmed event publication;
+- `payment.booked.v1` and `payment.failed.v1` envelopes, each with an active Notification email consumer;
+- Notification-owned processed-event ID store with leased claims for idempotent consumption;
+- bounded delayed retries and a durable poison-message dead-letter queue;
+- contract tests plus Compose duplicate-delivery and broker-down recovery verification.
 
 Exit criteria:
 
-- a committed financial transaction cannot lose its notification event;
-- duplicate delivery cannot duplicate notification side effects;
-- broker outage never rolls back or blocks ledger booking.
+- committed financial transactions insert their notification event before commit;
+- normal duplicate broker delivery does not create a second provider call;
+- broker outage delays delivery without rolling back or blocking ledger booking.
 
 ## Phase 5 — Extract identity service
 
@@ -213,9 +213,11 @@ The following gates apply to every phase:
 | ADR-002 | 1 | Domain ownership and dependency boundaries |
 | ADR-003 | 2 | Domain/application separation, ports, and the retained payment unit of work |
 | ADR-004 | 3 | Notification extraction, private HTTP contract, and failure semantics |
-| ADR-005 | 4 | Outbox, broker choice, delivery semantics, and deduplication |
-| ADR-006 | 5 | Identity data split, token authority, and migration |
-| ADR-007 | 6 | Gateway and service authentication |
-| ADR-008 | 7 | Telemetry standards and sensitive-data policy |
+| ADR-005 | 4 | RabbitMQ messaging topology and publisher confirmation |
+| ADR-006 | 4 | Transactional outbox and database/broker consistency boundary |
+| ADR-007 | 4 | At-least-once idempotent Notification consumer semantics |
+| ADR-008 | 5 | Identity data split, token authority, and migration |
+| ADR-009 | 6 | Gateway and service authentication |
+| ADR-010 | 7 | Telemetry standards and sensitive-data policy |
 
 Create an ADR only when the decision is actually made; do not pre-decide technology to fill the sequence.

@@ -68,7 +68,8 @@ flowchart LR
 | Tehlikeli object/embed engeli | `frontend/proxy.ts` | `object-src 'none'` uygulanır. |
 | Form ve base URI sınırı | `frontend/proxy.ts` | `form-action 'self'` ve `base-uri 'self'` açık yönlendirme/enjeksiyon etkisini sınırlar. |
 | React varsayılan escaping | `frontend/components/**/*.tsx` | Kullanıcı verileri JSX metni olarak render edilir. İncelemede `dangerouslySetInnerHTML`, `innerHTML`, `eval` veya `document.write` sink'i bulunmadı. |
-| İzole Notification servisi | `backend/cmd/notification-service/main.go`, `backend/internal/platform/notificationapi/handler.go`, `backend/internal/platform/notificationclient/client.go` | Servis Banking tablolarına erişmez; minimum 32 karakterlik bearer token, strict JSON, 64 KiB limit, correlation ID ve bounded timeout kullanır. |
+| İzole Notification servisi | `backend/cmd/notification-service/main.go`, `backend/internal/platform/notificationapi/handler.go`, `backend/internal/platform/rabbitmq/` | Servis Banking tablolarına erişmez; minimum 32 karakterlik bearer token, strict JSON, 64 KiB limit, correlation ID ve bounded timeout kullanır. Yalnızca kendi `notification.processed_events` event-ID tablosuna yazar. |
+| Transactional outbox ve RabbitMQ | `backend/internal/platform/outbox/`, `backend/internal/platform/rabbitmq/`, `backend/postgres/migrations/000013_add_transactional_outbox.up.sql` | Ödeme/defter transaction’ı event’i outbox’a commit eder; broker publish commit sonrasıdır. Persistent mesajlar/publisher confirm, retry kuyruğu, DLQ ve idempotent consumer dual-write ve duplicate riskini azaltır; exactly-once iddia edilmez. |
 | E-posta HTML escaping ve yerel yakalama | `backend/internal/platform/email/resend.go`, `backend/internal/platform/email/smtp.go`, `docker-compose.yml` | Açık komuttaki ad, hesap, tutar, karşı taraf ve açıklamalar bağlama uygun escape edilir. Lokal mesajlar MailHog SMTP ile yakalanır; üretimde Resend HTTPS kullanılabilir. |
 | MIME sniffing engeli | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` | `X-Content-Type-Options: nosniff` gönderilir. |
 | Referrer kısıtlaması | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` | API `no-referrer`, frontend `strict-origin-when-cross-origin` uygular. |
@@ -203,10 +204,10 @@ Mevcut limitler `backend/cmd/main.go` içinde tanımlıdır:
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
 | Non-root backend | `backend/Dockerfile` | Runtime `appuser` UID 10001 ile çalışır. |
-| Non-root Notification | `backend/Dockerfile.notification` | Ayrı servis `notification` UID 10002 ile ve Banking veritabanı yapılandırması olmadan çalışır. |
+| Non-root Notification | `backend/Dockerfile.notification` | Ayrı servis `notification` UID 10002 ile çalışır; yalnızca kendi processed-event tablosuna erişir, Banking tablolarına sorgu yolu yoktur. |
 | Non-root frontend | `frontend/Dockerfile` | Runtime `nextjs` UID 1001 ile çalışır. |
 | Minimal runtime | Dockerfile'lar | Multi-stage build kullanılır; frontend runtime'dan npm/corepack kaldırılır. |
-| Healthcheck | Dockerfile'lar, Compose dosyaları | Banking API, Notification, frontend ve PostgreSQL için sağlık kontrolleri vardır. |
+| Healthcheck | Dockerfile'lar, Compose dosyaları | Banking API, Notification, frontend, PostgreSQL ve RabbitMQ için sağlık kontrolleri vardır. |
 | Secret'in repodan ayrılması | `.gitignore`, `.env.example` | Gerçek `.env` commit edilmez; çalışma ortamına ayrıca aktarılır. |
 | Demo seed kapalı | `.env.example`, Compose dosyaları | `DEMO_SEED=false` varsayılandır; parola olmadan seed çalışmaz. |
 

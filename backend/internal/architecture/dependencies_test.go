@@ -28,6 +28,7 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/notification",
 		"internal/payment/domain",
 		"internal/platform/database",
+		"internal/platform/outbox",
 		"postgres/sqlc",
 	),
 	"platform/bootstrap": allowed(
@@ -64,6 +65,15 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/account",
 		"internal/notification",
 		"internal/platform/database",
+	),
+	"platform/notificationstore": {},
+	"platform/outbox": allowed(
+		"internal/notification",
+		"postgres/sqlc",
+	),
+	"platform/rabbitmq": allowed(
+		"internal/notification",
+		"internal/platform/notificationstore",
 	),
 }
 
@@ -120,7 +130,8 @@ func TestInternalPackageRootsAreIntentional(t *testing.T) {
 	})
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
 		"bootstrap": true, "database": true, "email": true, "httpapi": true,
-		"notificationapi": true, "notificationclient": true,
+		"notificationapi": true, "notificationclient": true, "notificationstore": true,
+		"outbox": true, "rabbitmq": true,
 	})
 }
 
@@ -167,7 +178,7 @@ func TestCoreDomainPackagesAreInfrastructureFree(t *testing.T) {
 	}
 }
 
-func TestNotificationExecutableCannotAccessBankingPersistence(t *testing.T) {
+func TestNotificationExecutableCannotAccessBankingPrivatePersistence(t *testing.T) {
 	root := filepath.Join("..", "..", "cmd", "notification-service")
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -187,8 +198,7 @@ func TestNotificationExecutableCannotAccessBankingPersistence(t *testing.T) {
 			if unquoteErr != nil {
 				t.Fatalf("read import in %s: %v", path, unquoteErr)
 			}
-			if importPath == "database/sql" || importPath == modulePath+"internal/platform/database" ||
-				importPath == modulePath+"postgres/sqlc" || importPath == "github.com/lib/pq" {
+			if importPath == modulePath+"internal/platform/database" || importPath == modulePath+"postgres/sqlc" {
 				t.Errorf("notification executable imports Banking persistence %q", importPath)
 			}
 		}

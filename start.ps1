@@ -102,8 +102,43 @@ if (-not $notificationTokenMatch.Success -or
     Write-Host "Guvenli NOTIFICATION_SERVICE_TOKEN otomatik olusturuldu." -ForegroundColor Yellow
 }
 
-Write-Host "PostgreSQL, MailHog ve Notification servisi baslatiliyor..." -ForegroundColor Cyan
-& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120 postgres mailhog notification-service
+$rabbitPasswordMatch = [regex]::Match($envContent, "(?m)^RABBITMQ_PASSWORD=(.*)$")
+if (-not $rabbitPasswordMatch.Success -or
+    $rabbitPasswordMatch.Groups[1].Value.Trim().Length -lt 32 -or
+    $rabbitPasswordMatch.Groups[1].Value.Contains("replace-with")) {
+    $randomBytes = New-Object byte[] 32
+    $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $randomGenerator.GetBytes($randomBytes)
+        # RabbitMQ credentials are embedded in an AMQP URL in Compose, so use
+        # URL-safe Base64 rather than characters such as / or +.
+        $rabbitPassword = [Convert]::ToBase64String($randomBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    }
+    finally {
+        $randomGenerator.Dispose()
+    }
+
+    $rabbitPasswordLine = "RABBITMQ_PASSWORD=$rabbitPassword"
+    if ($rabbitPasswordMatch.Success) {
+        $envContent = [regex]::Replace(
+            $envContent,
+            "(?m)^RABBITMQ_PASSWORD=.*$",
+            [Text.RegularExpressions.MatchEvaluator]{ param($match) $rabbitPasswordLine },
+            1
+        )
+    }
+    else {
+        if ($envContent.Length -gt 0 -and -not $envContent.EndsWith("`n")) {
+            $envContent += [Environment]::NewLine
+        }
+        $envContent += $rabbitPasswordLine + [Environment]::NewLine
+    }
+    [IO.File]::WriteAllText($envPath, $envContent, (New-Object Text.UTF8Encoding($false)))
+    Write-Host "Guvenli RABBITMQ_PASSWORD otomatik olusturuldu." -ForegroundColor Yellow
+}
+
+Write-Host "PostgreSQL, RabbitMQ, MailHog ve Notification servisi baslatiliyor..." -ForegroundColor Cyan
+& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120 postgres rabbitmq mailhog notification-service
 if ($LASTEXITCODE -ne 0) {
     & docker compose ps -a
     & docker compose logs --tail 80
@@ -170,6 +205,7 @@ Write-Host "Frontend : http://localhost:3000"
 Write-Host "Backend  : http://localhost:$backendDevPort"
 Write-Host "Swagger  : http://localhost:$backendDevPort/swagger/index.html"
 Write-Host "MailHog  : http://localhost:8425"
+Write-Host "RabbitMQ : http://localhost:15672"
 Write-Host "Notify   : http://localhost:8490/health"
 Write-Host "Database : localhost:5433"
 Write-Host "Durdurmak icin frontend terminalinde Ctrl+C, ardindan: .\start.ps1 -Stop"

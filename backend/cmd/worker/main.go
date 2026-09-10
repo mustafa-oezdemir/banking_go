@@ -20,7 +20,8 @@ import (
 
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationclient"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/outbox"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/rabbitmq"
 )
 
 func main() {
@@ -52,13 +53,28 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	store := db.NewStore(connection)
-	paymentService := payment.NewService(store, nil)
-	notificationClient, err := notificationclient.NewFromEnvironment(store)
+	rabbitConfig, err := rabbitmq.ConfigFromEnvironment()
 	if err != nil {
-		log.Error().Err(err).Msg("Worker notification client configuration is invalid")
+		log.Error().Err(err).Msg("Worker RabbitMQ configuration is invalid")
 		return
 	}
-	paymentService.SetNotificationSender(notificationClient)
+	rabbitPublisher, err := rabbitmq.NewPublisher(rabbitConfig)
+	if err != nil {
+		log.Error().Err(err).Msg("Worker RabbitMQ publisher initialization failed")
+		return
+	}
+	outboxRepository, err := outbox.NewRepository(connection)
+	if err != nil {
+		log.Error().Err(err).Msg("Worker outbox repository initialization failed")
+		return
+	}
+	outboxRunner, err := outbox.NewRunner(outboxRepository, rabbitPublisher)
+	if err != nil {
+		log.Error().Err(err).Msg("Worker outbox publisher initialization failed")
+		return
+	}
+	go outboxRunner.Run(ctx)
+	paymentService := payment.NewService(store, nil)
 	run := func() {
 		processed, runErr := paymentService.RunDuePayments(ctx, 50)
 		if runErr != nil {

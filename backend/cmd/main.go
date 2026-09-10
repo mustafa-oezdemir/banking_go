@@ -30,6 +30,8 @@ import (
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	api "github.com/mustafa-oezdemir/banking_go/internal/platform/httpapi"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationclient"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/outbox"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/rabbitmq"
 )
 
 func initLogger() {
@@ -253,6 +255,26 @@ func main() {
 	}()
 
 	store := db.NewStore(dbConn)
+	rabbitConfig, err := rabbitmq.ConfigFromEnvironment()
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("RabbitMQ configuration is invalid")
+	}
+	rabbitPublisher, err := rabbitmq.NewPublisher(rabbitConfig)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("RabbitMQ publisher initialization failed")
+	}
+	outboxRepository, err := outbox.NewRepository(dbConn)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Outbox repository initialization failed")
+	}
+	outboxRunner, err := outbox.NewRunner(outboxRepository, rabbitPublisher)
+	if err != nil {
+		zlog.Fatal().Err(err).Msg("Outbox publisher initialization failed")
+	}
+	outboxContext, stopOutbox := context.WithCancel(context.Background())
+	defer stopOutbox()
+	go outboxRunner.Run(outboxContext)
+	zlog.Info().Msg("Transactional outbox publisher started")
 	ledgerSvc := ledger.NewService(db.NewLedgerRepository(store))
 	eventHub := payment.NewEventHub()
 	paymentSvc := payment.NewService(store, eventHub)
@@ -277,11 +299,10 @@ func main() {
 	if err != nil {
 		zlog.Fatal().Err(err).Msg("Notification service client configuration is invalid")
 	}
-	paymentSvc.SetNotificationSender(notificationClient)
 	if notificationClient.Enabled() {
-		zlog.Info().Msg("Remote transactional notification delivery enabled")
+		zlog.Info().Msg("Synchronous password-reset notification delivery enabled")
 	} else {
-		zlog.Warn().Msg("Transactional notifications disabled: configure NOTIFICATION_SERVICE_URL and token")
+		zlog.Warn().Msg("Password-reset notifications disabled: configure NOTIFICATION_SERVICE_URL and token")
 	}
 
 	// Wire HTTP handlers with service and persistence dependencies.

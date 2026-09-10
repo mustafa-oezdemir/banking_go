@@ -3,10 +3,8 @@ package payment
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,20 +17,14 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
-type failingNotificationSender struct {
-	activityCalls atomic.Int32
+type recordingOutboxWriter struct {
+	events []notification.EventEnvelope
 }
 
-func (*failingNotificationSender) SendPasswordReset(context.Context, string, string, string) error {
-	return errors.New("notification service unavailable")
+func (writer *recordingOutboxWriter) Enqueue(_ context.Context, _ sqlc.DBTX, event notification.EventEnvelope) error {
+	writer.events = append(writer.events, event)
+	return nil
 }
-
-func (sender *failingNotificationSender) NotifyActivity(context.Context, notification.Activity) error {
-	sender.activityCalls.Add(1)
-	return errors.New("notification service unavailable")
-}
-
-func (*failingNotificationSender) Enabled() bool { return true }
 
 func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	ledger := setupTestLedger(t)
@@ -53,8 +45,8 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 
 	destinationIBAN := mustDemoIBAN(t)
 	service := NewService(ledger.store, nil)
-	failingNotifications := &failingNotificationSender{}
-	service.SetNotificationSender(failingNotifications)
+	recordingOutbox := &recordingOutboxWriter{}
+	service.SetOutboxWriter(recordingOutbox)
 	input := CreatePaymentInput{
 		OwnerID: owner.ID, SourceAccountID: source.ID, BeneficiaryName: "External Demo",
 		BeneficiaryIBAN: destinationIBAN, Amount: "12.34", TransferType: PaymentStandard,
@@ -95,8 +87,10 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	booked, err := service.GetPayment(ctx, owner.ID, created.Order.ID)
 	require.NoError(t, err)
 	require.Equal(t, PaymentBooked, booked.Status)
-	assert.EqualValues(t, 1, failingNotifications.activityCalls.Load(),
-		"provider failure must not roll back an already booked payment")
+	require.Len(t, recordingOutbox.events, 1)
+	assert.Equal(t, notification.EventTypePaymentBooked, recordingOutbox.events[0].EventType)
+	assert.Equal(t, created.Order.ID, recordingOutbox.events[0].AggregateID)
+	assert.NoError(t, recordingOutbox.events[0].Validate())
 	require.True(t, booked.LedgerTransactionID.Valid)
 	entries, err := ledger.store.ListEntriesByTransaction(ctx, booked.LedgerTransactionID.UUID)
 	require.NoError(t, err)
@@ -128,6 +122,72 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	unauthorized.IdempotencyKey = "unauthorized-" + uuid.NewString()
 	_, err = service.CreatePayment(ctx, unauthorized)
 	assert.ErrorIs(t, err, ErrPaymentUnauthorized)
+}
+
+func TestBookingWritesVersionedOutboxEventInThePaymentTransaction(t *testing.T) {
+	ledger := setupTestLedger(t)
+	ctx := context.Background()
+	owner, err := ledger.store.CreateUser(ctx, sqlc.CreateUserParams{
+		Email: fmt.Sprintf("outbox-%s@demo.invalid", uuid.NewString()), HashedPassword: "not-used", FullName: "Outbox Demo",
+	})
+	require.NoError(t, err)
+	source, err := ledger.store.CreateAccount(ctx, sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: owner.ID, Valid: true}, Name: "Outbox Current", Currency: "EUR",
+		IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	require.NoError(t, ledger.Deposit(ctx, source.ID, "20.00"))
+	service := NewService(ledger.store, nil)
+	created, err := service.CreatePayment(ctx, CreatePaymentInput{
+		OwnerID: owner.ID, SourceAccountID: source.ID, BeneficiaryName: "External Recipient", BeneficiaryIBAN: mustDemoIBAN(t),
+		Amount: "5.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Outbox test",
+		RequestedExecution: time.Now().UTC(), IdempotencyKey: "outbox-" + uuid.NewString(),
+	})
+	require.NoError(t, err)
+	booked, err := service.ConfirmPayment(ctx, owner.ID, created.Order.ID, true)
+	require.NoError(t, err)
+	require.Equal(t, PaymentBooked, booked.Status)
+
+	var event notification.EventEnvelope
+	require.NoError(t, ledger.store.ExecTxWithHandle(ctx, func(_ *sqlc.Queries, executor sqlc.DBTX) error {
+		return executor.QueryRowContext(ctx, `
+			SELECT id, event_type, event_version, aggregate_id, correlation_id, payload, occurred_at
+			FROM outbox_events WHERE aggregate_id = $1`, booked.ID,
+		).Scan(&event.EventID, &event.EventType, &event.EventVersion, &event.AggregateID,
+			&event.CorrelationID, &event.Payload, &event.OccurredAt)
+	}))
+	assert.Equal(t, notification.EventTypePaymentBooked, event.EventType)
+	assert.NoError(t, event.Validate())
+}
+
+func TestFailedPaymentWritesFailureOutboxEvent(t *testing.T) {
+	ledger := setupTestLedger(t)
+	ctx := context.Background()
+	owner, err := ledger.store.CreateUser(ctx, sqlc.CreateUserParams{
+		Email: fmt.Sprintf("outbox-failed-%s@demo.invalid", uuid.NewString()), HashedPassword: "not-used", FullName: "Failure Demo",
+	})
+	require.NoError(t, err)
+	source, err := ledger.store.CreateAccount(ctx, sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: owner.ID, Valid: true}, Name: "Empty Current", Currency: "EUR",
+		IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	service := NewService(ledger.store, nil)
+	created, err := service.CreatePayment(ctx, CreatePaymentInput{
+		OwnerID: owner.ID, SourceAccountID: source.ID, BeneficiaryName: "External Recipient", BeneficiaryIBAN: mustDemoIBAN(t),
+		Amount: "5.00", TransferType: PaymentStandard, ScheduleType: ScheduleImmediate, Purpose: "Failure outbox test",
+		RequestedExecution: time.Now().UTC(), IdempotencyKey: "outbox-failed-" + uuid.NewString(),
+	})
+	require.NoError(t, err)
+	failed, confirmErr := service.ConfirmPayment(ctx, owner.ID, created.Order.ID, true)
+	require.ErrorIs(t, confirmErr, ErrInsufficientFunds)
+	require.Equal(t, PaymentFailed, failed.Status)
+
+	var eventType string
+	require.NoError(t, ledger.store.ExecTxWithHandle(ctx, func(_ *sqlc.Queries, executor sqlc.DBTX) error {
+		return executor.QueryRowContext(ctx, `SELECT event_type FROM outbox_events WHERE aggregate_id = $1`, failed.ID).Scan(&eventType)
+	}))
+	assert.Equal(t, notification.EventTypePaymentFailed, eventType)
 }
 
 func TestValidatePaymentInputMoneyRules(t *testing.T) {

@@ -37,6 +37,9 @@ services:
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
       NOTIFICATION_SERVICE_URL: http://notification-service:8090
       NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-banking}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}@rabbitmq:5672/
+      RABBITMQ_RETRY_DELAY: ${RABBITMQ_RETRY_DELAY:-5s}
+      RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-3}
       SWAGGER_BASE_URL: ${SWAGGER_BASE_URL:-http://localhost:${BACKEND_PORT:-8383}}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       PORT: ${PORT:-8080}
@@ -47,6 +50,8 @@ services:
       postgres:
         condition: service_healthy
       notification-service:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:${PORT:-8080}/health || exit 1"]

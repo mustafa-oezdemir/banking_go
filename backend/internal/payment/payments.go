@@ -11,13 +11,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	ledgerdomain "github.com/mustafa-oezdemir/banking_go/internal/ledger/domain"
-	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	paymentdomain "github.com/mustafa-oezdemir/banking_go/internal/payment/domain"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
@@ -77,10 +75,10 @@ var (
 
 // Service owns payment state transitions and double-entry booking.
 type Service struct {
-	store    *db.Store
-	hub      *EventHub
-	now      func() time.Time
-	notifier notification.Sender
+	store  *db.Store
+	hub    *EventHub
+	now    func() time.Time
+	outbox OutboxWriter
 }
 
 // NewService creates a payment orchestration service for a store.
@@ -88,14 +86,7 @@ func NewService(store *db.Store, hub *EventHub) *Service {
 	if hub == nil {
 		hub = NewEventHub()
 	}
-	return &Service{store: store, hub: hub, now: time.Now, notifier: notification.NoopSender{}}
-}
-
-// SetNotificationSender enables post-commit account activity emails.
-func (s *Service) SetNotificationSender(sender notification.Sender) {
-	if sender != nil {
-		s.notifier = sender
-	}
+	return &Service{store: store, hub: hub, now: time.Now, outbox: defaultOutboxWriter()}
 }
 
 // EventHub returns the service's lightweight SSE notification hub.
@@ -247,7 +238,7 @@ func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (
 func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UUID, acceptMismatch bool) (sqlc.PaymentOrder, error) {
 	var result sqlc.PaymentOrder
 	var businessErr error
-	err := s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
+	err := s.store.ExecTxWithHandle(ctx, func(q *sqlc.Queries, executor sqlc.DBTX) error {
 		order, err := q.GetPaymentOrderForUpdate(ctx, paymentID)
 		if err == sql.ErrNoRows || order.OwnerID != ownerID {
 			return ErrPaymentNotFound
@@ -300,12 +291,18 @@ func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UU
 				return failErr
 			}
 			result = failed
+			if outboxErr := s.enqueueFailedEvent(ctx, q, executor, failed); outboxErr != nil {
+				return outboxErr
+			}
 			businessErr = executeErr
 			return s.auditWithQueries(ctx, q, ownerID, paymentID, "PAYMENT_FAILED", map[string]any{
 				"reason": publicFailureReason(executeErr),
 			})
 		}
 		result = booked
+		if outboxErr := s.enqueueBookedEvents(ctx, q, executor, booked); outboxErr != nil {
+			return outboxErr
+		}
 		return s.auditWithQueries(ctx, q, ownerID, paymentID, "PAYMENT_BOOKED", map[string]any{
 			"ledger_transaction_id": booked.LedgerTransactionID.UUID,
 		})
@@ -314,9 +311,6 @@ func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UU
 		return sqlc.PaymentOrder{}, err
 	}
 	s.hub.Publish(ownerID)
-	if businessErr == nil && result.Status == PaymentBooked {
-		s.notifyBookedPayment(ctx, result)
-	}
 	return result, businessErr
 }
 
@@ -457,30 +451,6 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 	return q.MarkPaymentBooked(ctx, sqlc.MarkPaymentBookedParams{
 		LedgerTransactionID: uuid.NullUUID{UUID: txID, Valid: true}, PaymentOrderID: order.ID,
 	})
-}
-
-func (s *Service) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrder) {
-	if err := s.notifier.NotifyActivity(ctx, notification.Activity{
-		UserID: order.OwnerID, AccountID: order.SourceAccountID, Kind: "SEPA_PAYMENT_SENT",
-		Direction: "DEBIT", Amount: order.Amount, Currency: "EUR",
-		Counterparty: order.BeneficiaryName, Reference: order.Purpose.String,
-	}); err != nil {
-		log.Warn().Err(err).Str("kind", "SEPA_PAYMENT_SENT").Msg("Post-commit notification failed")
-	}
-	if !order.BeneficiaryAccountID.Valid {
-		return
-	}
-	destination, err := s.store.GetAccount(ctx, order.BeneficiaryAccountID.UUID)
-	if err != nil || destination.IsSystem || !destination.OwnerID.Valid {
-		return
-	}
-	if err = s.notifier.NotifyActivity(ctx, notification.Activity{
-		UserID: destination.OwnerID.UUID, AccountID: destination.ID, Kind: "SEPA_PAYMENT_RECEIVED",
-		Direction: "CREDIT", Amount: order.Amount, Currency: "EUR",
-		Reference: order.Purpose.String,
-	}); err != nil {
-		log.Warn().Err(err).Str("kind", "SEPA_PAYMENT_RECEIVED").Msg("Post-commit notification failed")
-	}
 }
 
 func validatePaymentInput(input CreatePaymentInput, now time.Time) (decimal.Decimal, error) {
