@@ -7,7 +7,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
       POSTGRES_DB: ${DB_NAME:-simple_ledger}
     ports:
-      - "5433:5432"          
+      # DB_PORT is the host port; PostgreSQL stays on 5432 in the Compose network.
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +29,8 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8383}:8080"
+      # BACKEND_PORT is public; PORT is the backend's container listening port.
+      - "${BACKEND_PORT:-8383}:${PORT:-8080}"
     environment:
       DB_HOST: db
       DB_PORT: 5432
@@ -36,7 +38,7 @@ services:
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000}
       DEMO_SEED: ${DEMO_SEED:-false}
       DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
@@ -51,13 +53,15 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      SWAGGER_BASE_URL: ${SWAGGER_BASE_URL:-}
+      PORT: ${PORT:-8080}
     depends_on:
       db:
         condition: service_healthy
       mailhog:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:${PORT:-8080}/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -67,10 +71,10 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_API_URL: http://app:8080
+        BACKEND_API_URL: http://app:${PORT:-8080}
     restart: unless-stopped
     environment:
-      BACKEND_API_URL: http://app:8080
+      BACKEND_API_URL: http://app:${PORT:-8080}
       NEXT_TELEMETRY_DISABLED: 1
     ports:
       - "3000:3000"

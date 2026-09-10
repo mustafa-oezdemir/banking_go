@@ -11,10 +11,10 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "16.2.11",
+    "next": "16.3.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "sharp": "0.35.0",
+    "sharp": "0.35.4",
     "zustand": "^4.4.1"
   },
   "devDependencies": {
@@ -23,7 +23,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.11",
+    "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
@@ -32,7 +32,7 @@
   "author": "Mustafa Özdemir",
   "license": "MIT",
   "resolutions": {
-    "postcss": "8.5.18",
-    "sharp": "0.35.0"
+    "baseline-browser-mapping": "2.11.22",
+    "sharp": "0.35.4"
   }
 }
