@@ -1,0 +1,1139 @@
+// Package api exposes HTTP handlers, middleware, and response types for the ledger service.
+package api
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
+	"github.com/shopspring/decimal"
+
+	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
+	"github.com/mustafa-oezdemir/banking_go/internal/identity"
+	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	"github.com/mustafa-oezdemir/banking_go/internal/notification"
+	"github.com/mustafa-oezdemir/banking_go/internal/payment"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
+)
+
+// Handler serves HTTP requests backed by the ledger and store layers.
+type Handler struct {
+	ledger   *ledger.LedgerService
+	payments *payment.PaymentService
+	store    *db.Store
+	notifier notification.Sender
+}
+
+func validateAccountName(rawName string) (string, error) {
+	return sepa.ValidateName(rawName)
+}
+
+func authenticatedUserID(r *http.Request) (uuid.UUID, error) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	userIDRaw, ok := claims["user_id"].(string)
+	if !ok {
+		return uuid.Nil, errors.New("user_id claim missing or invalid")
+	}
+
+	userID, err := uuid.Parse(userIDRaw)
+	if err != nil {
+		return uuid.Nil, errors.New("user_id claim is not a valid UUID")
+	}
+	return userID, nil
+}
+
+func parseQueryInt32(raw string) (int32, error) {
+	var value int32
+	err := json.Unmarshal([]byte(raw), &value)
+	return value, err
+}
+
+// NewHandler constructs a Handler with the required service and persistence dependencies.
+func NewHandler(ledgerService *ledger.LedgerService, store *db.Store) *Handler {
+	return &Handler{
+		ledger: ledgerService, payments: payment.NewPaymentService(store, nil), store: store,
+		notifier: notification.NoopSender{},
+	}
+}
+
+// NewHandlerWithPayments allows main and the standalone worker to share the
+// same payment service and in-memory SSE hub.
+func NewHandlerWithPayments(ledgerService *ledger.LedgerService, paymentService *payment.PaymentService, store *db.Store) *Handler {
+	return &Handler{ledger: ledgerService, payments: paymentService, store: store, notifier: notification.NoopSender{}}
+}
+
+// SetNotificationSender enables transactional security and account emails.
+func (h *Handler) SetNotificationSender(sender notification.Sender) {
+	if sender != nil {
+		h.notifier = sender
+	}
+}
+
+// Register godoc
+// @Summary      Register a new user
+// @Description  Creates a user, a default EUR account, and a fictional 500 EUR opening balance; returns user details and a JWT token
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body    body      object{email=string,password=string}  true  "User registration details"
+// @Success      201     {object}  RegisterResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      409     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /register [post]
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Decode registration payload.
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		FullName string `json:"full_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		log.Warn().Err(err).Msg("Failed to decode register request")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	email, validationErr := identity.NormalizeEmail(input.Email)
+	if validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+	if validationErr = identity.ValidatePassword(input.Password); validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+
+	// Step 2: Hash password before persisting user credentials.
+	hashed, err := identity.HashPassword(input.Password)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to hash password")
+		respondError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+
+	// Step 3: Atomically persist the user, their EUR account, and the balanced signup credit.
+	customer, err := h.ledger.CreateFundedCustomer(r.Context(), sqlc.CreateUserParams{
+		Email:          email,
+		HashedPassword: hashed,
+		FullName:       defaultFullName(input.FullName, email),
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create user")
+		respondError(w, http.StatusConflict, "user already exists or failed")
+		return
+	}
+
+	token, err := GenerateToken(customer.User.ID)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to generate token")
+		respondError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	SetSessionCookie(w, r, token)
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: customer.User.ID, AccountID: customer.Account.ID, Kind: "REGISTRATION_CREDIT",
+		Direction: "CREDIT", Amount: signupOpeningBalance, Currency: "EUR", Reference: "Startguthaben",
+	})
+
+	log.Info().Msg("User registered successfully")
+	respondJSON(w, http.StatusCreated, RegisterResponse{
+		UserID:     customer.User.ID.String(),
+		Email:      customer.User.Email,
+		AccountID:  customer.Account.ID.String(),
+		MaskedIBAN: sepa.MaskIBAN(customer.Account.Iban),
+	})
+}
+
+// Login godoc
+// @Summary      Login user
+// @Description  Authenticates user with email/password and returns JWT token
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body    body      object{email=string,password=string}  true  "User login details"
+// @Success      200     {object}  MessageResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /login [post]
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Decode login payload.
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		log.Warn().Err(err).Msg("Failed to decode login request")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	email, validationErr := identity.NormalizeEmail(input.Email)
+	if validationErr != nil || input.Password == "" || len([]byte(input.Password)) > identity.MaxPasswordBytes {
+		respondError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	// Step 2: Load user by email and compare bcrypt password hash.
+	user, err := h.store.GetUserByEmail(r.Context(), email)
+	if err != nil {
+		identity.VerifyDummyPassword(input.Password)
+		log.Warn().Err(err).Msg("Login failed - user not found")
+		respondError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	if !identity.VerifyPassword(user.HashedPassword, input.Password) {
+		log.Warn().Msg("Login failed - invalid password")
+		respondError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	// Step 3: Return a fresh JWT on successful authentication.
+	sessionVersion, err := h.store.GetUserSessionVersion(r.Context(), user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+	token, err := GenerateTokenForVersion(user.ID, sessionVersion)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to generate token")
+		respondError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	SetSessionCookie(w, r, token)
+
+	log.Info().Msg("User logged in successfully")
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "Login successful"})
+}
+
+// Logout revokes the authenticated token generation and clears the browser cookie.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	revokeAuthenticatedSession(h.store, r)
+	ClearSessionCookie(w, r)
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "Logout successful"})
+}
+
+// Session returns the identity of a valid authenticated session.
+func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	role, err := h.store.GetUserRole(r.Context(), userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load user role")
+		return
+	}
+	respondJSON(w, http.StatusOK, SessionResponse{UserID: userID.String(), Email: user.Email, Role: role})
+}
+
+// CreateAccount godoc
+// @Summary      Create a new account
+// @Description  Creates a new user-owned account with name and currency
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        body    body      object{name=string}  true  "Account details"
+// @Success      201     {object}  AccountResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /accounts [post]
+// @Security     Bearer
+func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller from JWT claims.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	// Step 2: Decode request payload.
+	var input struct {
+		Name string `json:"name"`
+	}
+	if decodeErr := json.NewDecoder(r.Body).Decode(&input); decodeErr != nil {
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	name, validationErr := validateAccountName(input.Name)
+	if validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+
+	// Step 3: Create a user-owned account in default currency.
+	var acc sqlc.Account
+	for attempt := 0; attempt < 5; attempt++ {
+		iban, ibanErr := sepa.GenerateGermanDemoIBAN()
+		if ibanErr != nil {
+			err = ibanErr
+			break
+		}
+		acc, err = h.store.CreateAccount(r.Context(), sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: userID, Valid: true}, Name: name,
+			Currency: "EUR", IsSystem: false, Iban: iban,
+			AccountType: "GIROKONTO", Status: "ACTIVE",
+		})
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create account")
+		respondError(w, http.StatusInternalServerError, "failed to create account")
+		return
+	}
+
+	log.Info().Msg("Account created")
+	respondJSON(w, http.StatusCreated, toAccountResponse(acc))
+}
+
+// ListAccounts godoc
+// @Summary      List user accounts
+// @Description  Returns list of accounts owned by authenticated user
+// @Tags         accounts
+// @Produce      json
+// @Success      200     {array}   AccountResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /accounts [get]
+// @Security     Bearer
+func (h *Handler) ListAccounts(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	// Step 2: Fetch only accounts owned by the authenticated user.
+	accounts, err := h.store.ListAccountsByOwner(r.Context(), uuid.NullUUID{UUID: userID, Valid: true})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to list accounts")
+		respondError(w, http.StatusInternalServerError, "failed to list accounts")
+		return
+	}
+
+	response := make([]AccountResponse, len(accounts))
+	for i, acc := range accounts {
+		response[i] = toAccountListResponse(acc)
+	}
+
+	respondJSON(w, http.StatusOK, response)
+}
+
+// GetAccount godoc
+// @Summary      Get account details
+// @Description  Returns details of a specific account
+// @Tags         accounts
+// @Produce      json
+// @Param        id   path      string  true  "Account ID"
+// @Success      200  {object}  AccountResponse
+// @Failure      400  {object}  ErrorResponse
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Router       /accounts/{id} [get]
+// @Security     Bearer
+func (h *Handler) GetAccount(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and parse target account ID.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountIDStr := chi.URLParam(r, "id")
+	accountID, err := uuid.Parse(accountIDStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	// Step 2: Enforce account ownership before returning account details.
+	acc, err := h.store.GetAccount(r.Context(), accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Account not found")
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+
+	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
+		log.Warn().Msg("Access denied to account")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, toAccountResponse(acc))
+}
+
+// UpdateAccount godoc
+// @Summary      Update an account
+// @Description  Renames an account owned by the authenticated user
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string               true  "Account ID"
+// @Param        body  body      object{name=string}  true  "Updated account details"
+// @Success      200   {object}  AccountResponse
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      403   {object}  ErrorResponse
+// @Failure      404   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /accounts/{id} [put]
+// @Security     Bearer
+func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to authenticate account update")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	var input struct {
+		Name string `json:"name"`
+	}
+	if decodeErr := json.NewDecoder(r.Body).Decode(&input); decodeErr != nil {
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	name, validationErr := validateAccountName(input.Name)
+	if validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+
+	account, err := h.store.GetAccount(r.Context(), accountID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load account for update")
+		respondError(w, http.StatusInternalServerError, "failed to update account")
+		return
+	}
+	if account.IsSystem || !account.OwnerID.Valid || account.OwnerID.UUID != userID {
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	updatedAccount, err := h.store.UpdateAccount(r.Context(), sqlc.UpdateAccountParams{
+		Name:      name,
+		AccountID: accountID,
+		OwnerID:   uuid.NullUUID{UUID: userID, Valid: true},
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusConflict, "account changed while it was being updated")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to update account")
+		respondError(w, http.StatusInternalServerError, "failed to update account")
+		return
+	}
+
+	log.Info().Msg("Account updated")
+	respondJSON(w, http.StatusOK, toAccountResponse(updatedAccount))
+}
+
+// DeleteAccount godoc
+// @Summary      Delete an unused account
+// @Description  Deletes a user-owned account only when its balance is zero and it has no ledger entries
+// @Tags         accounts
+// @Produce      json
+// @Param        id   path      string  true  "Account ID"
+// @Success      200  {object}  MessageResponse
+// @Failure      400  {object}  ErrorResponse
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      409  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /accounts/{id} [delete]
+// @Security     Bearer
+func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, err := authenticatedUserID(r)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to authenticate account deletion")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	account, err := h.store.GetAccount(r.Context(), accountID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load account for deletion")
+		respondError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+	if account.IsSystem || !account.OwnerID.Valid || account.OwnerID.UUID != userID {
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	balance, err := decimal.NewFromString(account.Balance)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to parse account balance")
+		respondError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+	if !balance.IsZero() {
+		respondError(w, http.StatusConflict, "account balance must be zero before deletion")
+		return
+	}
+
+	hasEntries, err := h.store.AccountHasEntries(r.Context(), accountID)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to check account history")
+		respondError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+	if hasEntries {
+		respondError(w, http.StatusConflict, "accounts with transaction history cannot be deleted")
+		return
+	}
+
+	_, err = h.store.DeleteAccount(r.Context(), sqlc.DeleteAccountParams{
+		AccountID: accountID,
+		OwnerID:   uuid.NullUUID{UUID: userID, Valid: true},
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusConflict, "account changed and can no longer be deleted")
+		return
+	}
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to delete account")
+		respondError(w, http.StatusInternalServerError, "failed to delete account")
+		return
+	}
+
+	log.Info().Msg("Account deleted")
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "Account deleted successfully"})
+}
+
+// Deposit godoc
+// @Summary      Deposit money into account
+// @Description  Deposits fiat amount (mock) with double-entry ledger update
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string  true   "Account ID"
+// @Param        body    body      object{amount=string}  true  "Deposit amount (e.g., 1000.0000)"
+// @Success      200     {object}  MessageResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /accounts/{id}/deposit [post]
+// @Security     Bearer
+func (h *Handler) Deposit(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and target account.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	// Step 2: Load account and enforce ownership authorization.
+	acc, err := h.store.GetAccount(r.Context(), accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Deposit failed - account not found")
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
+		log.Warn().Msg("Deposit denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Step 3: Decode amount and invoke service-level double-entry logic.
+	amount, err := decodeAmountFromBody(r)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to decode deposit request")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	err = h.ledger.Deposit(r.Context(), accountID, amount)
+	if err != nil {
+		log.Error().Err(err).Msg("Deposit failed")
+		code := http.StatusInternalServerError
+		if errors.Is(err, ledger.ErrInvalidAmount) || errors.Is(err, ledger.ErrCurrencyMismatch) {
+			code = http.StatusBadRequest
+		}
+		respondError(w, code, err.Error())
+		return
+	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: accountID, Kind: "DEPOSIT",
+		Direction: "CREDIT", Amount: amount, Currency: acc.Currency,
+	})
+
+	log.Info().Msg("Deposit successful")
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "deposit successful"})
+}
+
+// Withdraw godoc
+// @Summary      Withdraw money from account
+// @Description  Withdraws fiat amount (mock) with double-entry ledger update
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string  true   "Account ID"
+// @Param        body    body      object{amount=string}  true  "Withdraw amount (e.g., 500.0000)"
+// @Success      200     {object}  MessageResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /accounts/{id}/withdraw [post]
+// @Security     Bearer
+func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and target account.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	// Step 2: Enforce ownership before attempting withdrawal.
+	acc, err := h.store.GetAccount(r.Context(), accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Withdrawal failed - account not found")
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
+		log.Warn().Msg("Withdrawal denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Step 3: Decode amount and delegate business checks to service layer.
+	amount, err := decodeAmountFromBody(r)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to decode withdrawal request")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	err = h.ledger.Withdraw(r.Context(), accountID, amount)
+	if err != nil {
+		log.Error().Err(err).Msg("Withdrawal failed")
+		code := http.StatusInternalServerError
+		if errors.Is(err, ledger.ErrInsufficientFunds) || errors.Is(err, ledger.ErrInvalidAmount) || errors.Is(err, ledger.ErrCurrencyMismatch) {
+			code = http.StatusBadRequest
+		}
+		respondError(w, code, err.Error())
+		return
+	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: accountID, Kind: "WITHDRAWAL",
+		Direction: "DEBIT", Amount: amount, Currency: acc.Currency,
+	})
+
+	log.Info().Msg("Withdrawal successful")
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "withdrawal successful"})
+}
+
+// Transfer godoc
+// @Summary      Transfer money between accounts
+// @Description  Transfers funds only between the authenticated customer's own accounts with atomic double-entry updates. Transfers to other customers must use the confirmed payments flow. The amount field accepts JSON number or string. from_id/to_id are preferred; from_account_id/to_account_id are supported as legacy aliases.
+// @Tags         accounts
+// @Accept       json
+// @Produce      json
+// @Param        body    body      object{from_id=string,to_id=string,amount=string}  true  "Transfer details"
+// @Success      200     {object}  MessageResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Router       /transfers [post]
+// @Security     Bearer
+func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	// Step 2: Decode payload with support for current and legacy field names.
+	var input struct {
+		Amount        interface{} `json:"amount"`
+		FromID        string      `json:"from_id"`
+		ToID          string      `json:"to_id"`
+		FromAccountID string      `json:"from_account_id"`
+		ToAccountID   string      `json:"to_account_id"`
+	}
+	if decodeErr := decodeStrictJSON(r, &input); decodeErr != nil {
+		log.Warn().Err(decodeErr).Msg("Failed to decode transfer request")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	// Normalize IDs so handlers accept both new and legacy API clients.
+	fromIDRaw := strings.TrimSpace(input.FromID)
+	if fromIDRaw == "" {
+		fromIDRaw = strings.TrimSpace(input.FromAccountID)
+	}
+	toIDRaw := strings.TrimSpace(input.ToID)
+	if toIDRaw == "" {
+		toIDRaw = strings.TrimSpace(input.ToAccountID)
+	}
+
+	log.Info().Msg("Transfer request received")
+
+	if fromIDRaw == "" {
+		log.Warn().Msg("Transfer missing from_id")
+		respondError(w, http.StatusBadRequest, "from_id (or from_account_id) is required")
+		return
+	}
+	if toIDRaw == "" {
+		log.Warn().Msg("Transfer missing to_id")
+		respondError(w, http.StatusBadRequest, "to_id (or to_account_id) is required")
+		return
+	}
+
+	// Step 3: Validate IDs and amount format before business execution.
+	fromID, err := uuid.Parse(fromIDRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Invalid from_id UUID format")
+		respondError(w, http.StatusBadRequest, "invalid from_id format")
+		return
+	}
+
+	toID, err := uuid.Parse(toIDRaw)
+	if err != nil {
+		log.Warn().Err(err).Msg("Invalid to_id UUID format")
+		respondError(w, http.StatusBadRequest, "invalid to_id format")
+		return
+	}
+
+	if fromID == uuid.Nil || toID == uuid.Nil {
+		respondError(w, http.StatusBadRequest, "from_id and to_id must be valid non-zero UUIDs")
+		return
+	}
+
+	amount, err := normalizeAmountInput(input.Amount)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to parse transfer amount")
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+
+	// Step 4: Resolve the source for notification metadata. The service repeats
+	// ownership checks for both locked account rows before writing the ledger.
+	fromAcc, err := h.store.GetAccount(r.Context(), fromID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Transfer failed - from account not found")
+		respondError(w, http.StatusNotFound, "from account not found")
+		return
+	}
+	if fromAcc.IsSystem || !fromAcc.OwnerID.Valid || fromAcc.OwnerID.UUID != userID {
+		log.Warn().Msg("Transfer denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Step 5: Run transfer through service layer (atomic double-entry write).
+	err = h.ledger.Transfer(r.Context(), userID, fromID, toID, amount)
+	if err != nil {
+		if errors.Is(err, ledger.ErrAccountOwnership) {
+			log.Warn().Msg("Transfer denied - account ownership check failed")
+			respondError(w, http.StatusForbidden, "access denied")
+			return
+		}
+		log.Warn().Err(err).Msg("Transfer failed")
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.notifier.NotifyActivity(notification.Activity{
+		UserID: userID, AccountID: fromID, Kind: "TRANSFER_SENT",
+		Direction: "DEBIT", Amount: amount, Currency: fromAcc.Currency,
+	})
+	toAcc, lookupErr := h.store.GetAccount(r.Context(), toID)
+	if lookupErr == nil && !toAcc.IsSystem && toAcc.OwnerID.Valid {
+		h.notifier.NotifyActivity(notification.Activity{
+			UserID: toAcc.OwnerID.UUID, AccountID: toID, Kind: "TRANSFER_RECEIVED",
+			Direction: "CREDIT", Amount: amount, Currency: toAcc.Currency,
+		})
+	}
+
+	log.Info().Msg("Transfer successful")
+	respondJSON(w, http.StatusOK, MessageResponse{Message: "transfer successful"})
+}
+
+// GetEntries godoc
+// @Summary      Get account entries
+// @Description  Returns list of ledger entries for an account (immutable history)
+// @Tags         accounts
+// @Produce      json
+// @Param        id      path      string  true   "Account ID"
+// @Param        limit   query     int     false  "Limit (default 20)"
+// @Param        offset  query     int     false  "Offset (default 0)"
+// @Success      200     {array}   EntryResponse
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /accounts/{id}/entries [get]
+// @Security     Bearer
+func (h *Handler) GetEntries(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and parse account ID.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	// Step 2: Enforce account ownership.
+	acc, err := h.store.GetAccount(r.Context(), accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Get entries failed - account not found")
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
+		log.Warn().Msg("Get entries denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Step 3: Parse pagination with safe defaults and caps.
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+
+	limit := int32(20)
+	offset := int32(0)
+
+	if v, parseErr := parseQueryInt32(limitStr); parseErr == nil && v > 0 {
+		limit = min(v, 100)
+	}
+	if v, parseErr := parseQueryInt32(offsetStr); parseErr == nil && v >= 0 {
+		offset = v
+	}
+
+	// Step 4: Fetch immutable ledger entries for the account.
+	entries, err := h.store.ListEntriesByAccount(r.Context(), sqlc.ListEntriesByAccountParams{
+		AccountID: accountID,
+		Limit:     limit,
+		Offset:    offset,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to fetch entries")
+		respondError(w, http.StatusInternalServerError, "failed to fetch entries")
+		return
+	}
+
+	response := make([]EntryResponse, len(entries))
+	for i, entry := range entries {
+		response[i] = toEntryResponse(entry)
+	}
+
+	respondJSON(w, http.StatusOK, response)
+}
+
+// GetTransactions godoc
+// @Summary      Get transaction details
+// @Description  Returns both entries (debit and credit) for a complete transaction view
+// @Tags         accounts
+// @Produce      json
+// @Param        id   path      string  true  "Transaction ID"
+// @Success      200  {array}   EntryResponse
+// @Failure      400  {object}  ErrorResponse
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /transactions/{id} [get]
+// @Security     Bearer
+func (h *Handler) GetTransactions(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and parse transaction ID.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	transactionIDStr := chi.URLParam(r, "id")
+	transactionID, err := uuid.Parse(transactionIDStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid transaction ID")
+		return
+	}
+
+	// Step 2: Load all entries belonging to the transaction.
+	entries, err := h.store.ListEntriesByTransaction(r.Context(), transactionID)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to fetch transaction")
+		respondError(w, http.StatusInternalServerError, "failed to fetch transaction")
+		return
+	}
+
+	if len(entries) == 0 {
+		log.Warn().Msg("Transaction not found")
+		respondError(w, http.StatusNotFound, "transaction not found")
+		return
+	}
+
+	// Step 3: Authorize if user owns at least one account in this transaction.
+	authorized := false
+	for _, entry := range entries {
+		acc, err := h.store.GetAccount(r.Context(), entry.AccountID)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to authorize transaction")
+			respondError(w, http.StatusInternalServerError, "failed to authorize transaction")
+			return
+		}
+
+		if acc.OwnerID.Valid && acc.OwnerID.UUID == userID {
+			authorized = true
+			break
+		}
+	}
+
+	if !authorized {
+		log.Warn().Msg("Get transaction denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	response := make([]EntryResponse, len(entries))
+	for i, entry := range entries {
+		response[i] = toEntryResponse(entry)
+	}
+
+	respondJSON(w, http.StatusOK, response)
+}
+
+// ReconcileAccount godoc
+// @Summary      Reconcile account balance
+// @Description  Verifies stored balance matches sum of all ledger entries (credits - debits)
+// @Tags         accounts
+// @Produce      json
+// @Param        id   path      string  true  "Account ID"
+// @Success      200  {object}  ReconcileResponse
+// @Failure      400  {object}  ErrorResponse
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /accounts/{id}/reconcile [get]
+// @Security     Bearer
+func (h *Handler) ReconcileAccount(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Authenticate caller and parse account ID.
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to extract JWT from context")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userIDStr, ok := claims["user_id"].(string)
+	if !ok {
+		log.Warn().Msg("user_id claim missing or invalid in JWT")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		log.Error().Err(err).Msg("Invalid user_id UUID in token")
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	accountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid account ID")
+		return
+	}
+
+	// Step 2: Enforce ownership before reconciliation.
+	acc, err := h.store.GetAccount(r.Context(), accountID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Reconcile failed - account not found")
+		respondError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if acc.IsSystem || !acc.OwnerID.Valid || acc.OwnerID.UUID != userID {
+		log.Warn().Msg("Reconcile denied - access forbidden")
+		respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Step 3: Compare stored balance with computed ledger balance.
+	matched, err := h.ledger.ReconcileAccount(r.Context(), accountID)
+	if err != nil {
+		log.Error().Err(err).Msg("Reconciliation failed")
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	log.Info().Bool("matched", matched).Msg("Reconciliation completed")
+	respondJSON(w, http.StatusOK, ReconcileResponse{
+		Matched: matched,
+		Message: "Account reconciled successfully",
+	})
+}

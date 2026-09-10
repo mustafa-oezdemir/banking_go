@@ -6,7 +6,8 @@
 go.work
 
 # Compiled binaries
-ledger
+/ledger
+/backend/ledger
 ledger.exe
 *.exe
 *.exe*

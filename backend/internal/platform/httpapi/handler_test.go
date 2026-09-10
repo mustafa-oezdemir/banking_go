@@ -1,0 +1,296 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/jwtauth/v5"
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
+	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
+)
+
+func setupTestHandler(t *testing.T) *Handler {
+	// Keep test database configuration separate from the application database.
+	dbURL := os.Getenv("TEST_DB_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("DB_URL")
+	}
+	if dbURL == "" {
+		dbURL = "postgresql://root:secret@localhost:5433/simple_ledger?sslmode=disable"
+	}
+	sqlDB, err := sql.Open("postgres", dbURL)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err = sqlDB.PingContext(ctx); err != nil {
+		require.NoError(t, sqlDB.Close())
+		t.Skipf("PostgreSQL integration test unavailable: %v", err)
+	}
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	store := db.NewStore(sqlDB)
+	ledgerService := ledger.NewLedgerService(store)
+	return NewHandler(ledgerService, store)
+}
+
+func TestRegisterHandler_BadRequest(t *testing.T) {
+	// Missing request body should trigger 400 validation response.
+	h := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/register", nil)
+	rw := httptest.NewRecorder()
+	h.Register(rw, req)
+	assert.Equal(t, http.StatusBadRequest, rw.Code)
+}
+
+func TestRegisterHandler_Success(t *testing.T) {
+	h := setupTestHandler(t)
+	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
+
+	// Use a unique email per run to avoid DB uniqueness collisions.
+	email := "testuser_" + uuid.New().String() + "@example.com"
+	body := map[string]string{"email": email, "password": "testpassword123"}
+	b, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(b))
+	rw := httptest.NewRecorder()
+
+	h.Register(rw, req)
+	assert.Equal(t, http.StatusCreated, rw.Code)
+	var registerResponse RegisterResponse
+	require.NoError(t, json.NewDecoder(rw.Body).Decode(&registerResponse))
+	user, err := h.store.GetUserByEmail(t.Context(), email)
+	require.NoError(t, err)
+	accounts, err := h.store.ListAccountsByOwner(t.Context(), uuid.NullUUID{UUID: user.ID, Valid: true})
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	assert.Equal(t, "EUR", accounts[0].Currency)
+	assert.Equal(t, "GIROKONTO", accounts[0].AccountType)
+	require.NoError(t, sepa.ValidateIBAN(accounts[0].Iban))
+	assert.Equal(t, accounts[0].ID.String(), registerResponse.AccountID)
+	assert.Equal(t, sepa.MaskIBAN(accounts[0].Iban), registerResponse.MaskedIBAN)
+	assert.Equal(t, "500.0000", accounts[0].Balance)
+	calculatedBalance, err := h.store.GetAccountBalance(t.Context(), accounts[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, "500.0000", calculatedBalance)
+
+	cookies := rw.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, sessionCookieName, cookies[0].Name)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+}
+
+func TestRegisterHandler_RejectsWeakPassword(t *testing.T) {
+	h := setupTestHandler(t)
+	body := map[string]string{"email": "weak@example.com", "password": "password"}
+	payload, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
+	rw := httptest.NewRecorder()
+	h.Register(rw, req)
+	assert.Equal(t, http.StatusBadRequest, rw.Code)
+}
+
+func TestAdminOverviewWithActiveSeededSession(t *testing.T) {
+	h := setupTestHandler(t)
+	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
+	adminID, err := h.store.UpsertAdminUser(
+		t.Context(), "overview-admin-"+uuid.NewString()+"@example.com", "test-only", "Overview Admin",
+	)
+	require.NoError(t, err)
+	rawIBAN, err := sepa.GenerateGermanDemoIBAN()
+	require.NoError(t, err)
+	adminAccount, err := h.store.CreateAccount(t.Context(), sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: adminID, Valid: true}, Name: "Overview Account", Currency: "EUR",
+		Iban: rawIBAN, AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	version, err := h.store.GetUserSessionVersion(t.Context(), adminID)
+	require.NoError(t, err)
+	token, err := GenerateTokenForVersion(adminID, version)
+	require.NoError(t, err)
+
+	router := chi.NewRouter()
+	router.Use(jwtauth.Verifier(TokenAuth))
+	router.Use(jwtauth.Authenticator(TokenAuth))
+	router.Use(RequireActiveSession(h.store))
+	router.Get("/admin/overview", h.AdminOverview)
+	req := httptest.NewRequest(http.MethodGet, "/admin/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	require.Equal(t, http.StatusOK, rw.Code, rw.Body.String())
+	var overview adminOverviewResponse
+	require.NoError(t, json.NewDecoder(rw.Body).Decode(&overview))
+	require.NotEmpty(t, overview.Users)
+	for _, account := range overview.Accounts {
+		if account.ID == adminAccount.ID.String() {
+			require.Equal(t, sepa.MaskIBAN(rawIBAN), account.MaskedIBAN)
+			return
+		}
+	}
+	t.Fatal("seeded admin account was missing from overview")
+}
+
+func TestValidateAccountName(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		expected  string
+		wantError bool
+	}{
+		{name: "trims whitespace", input: "  Savings  ", expected: "Savings"},
+		{name: "rejects empty", input: "   ", wantError: true},
+		{name: "accepts unicode", input: "Özel Hesap", expected: "Özel Hesap"},
+		{name: "rejects long names", input: strings.Repeat("a", 101), wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual, err := validateAccountName(test.input)
+			if test.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.expected, actual)
+		})
+	}
+}
+
+func TestParseQueryInt32RejectsOverflow(t *testing.T) {
+	value, err := parseQueryInt32("2147483647")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2147483647), value)
+	_, err = parseQueryInt32("2147483648")
+	require.Error(t, err)
+}
+
+func setupAccountRouter(t *testing.T, h *Handler) http.Handler {
+	t.Helper()
+
+	router := chi.NewRouter()
+	router.Use(jwtauth.Verifier(TokenAuth))
+	router.Use(jwtauth.Authenticator(TokenAuth))
+	router.Post("/accounts", h.CreateAccount)
+	router.Get("/accounts/{id}", h.GetAccount)
+	router.Put("/accounts/{id}", h.UpdateAccount)
+	router.Delete("/accounts/{id}", h.DeleteAccount)
+	return router
+}
+
+func createTestUserToken(t *testing.T, h *Handler) string {
+	t.Helper()
+
+	user, err := h.store.CreateUser(t.Context(), sqlc.CreateUserParams{
+		Email:          "crud_" + uuid.New().String() + "@example.com",
+		HashedPassword: "not-used-by-this-test",
+		FullName:       "Demo Test User",
+	})
+	require.NoError(t, err)
+
+	token, err := GenerateToken(user.ID)
+	require.NoError(t, err)
+	return token
+}
+
+func performJSONRequest(
+	t *testing.T,
+	handler http.Handler,
+	token string,
+	method string,
+	path string,
+	body any,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var payload []byte
+	var err error
+	if body != nil {
+		payload, err = json.Marshal(body)
+		require.NoError(t, err)
+	}
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rw := httptest.NewRecorder()
+	handler.ServeHTTP(rw, req)
+	return rw
+}
+
+func TestAccountCRUDAndOwnership(t *testing.T) {
+	h := setupTestHandler(t)
+	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
+	router := setupAccountRouter(t, h)
+	ownerToken := createTestUserToken(t, h)
+	otherUserToken := createTestUserToken(t, h)
+
+	createResponse := performJSONRequest(
+		t,
+		router,
+		ownerToken,
+		http.MethodPost,
+		"/accounts",
+		map[string]string{"name": "  Main Account  "},
+	)
+	require.Equal(t, http.StatusCreated, createResponse.Code)
+	var account AccountResponse
+	require.NoError(t, json.NewDecoder(createResponse.Body).Decode(&account))
+	assert.Equal(t, "Main Account", account.Name)
+
+	accountPath := "/accounts/" + account.ID
+	readResponse := performJSONRequest(t, router, ownerToken, http.MethodGet, accountPath, nil)
+	require.Equal(t, http.StatusOK, readResponse.Code)
+
+	forbiddenRead := performJSONRequest(t, router, otherUserToken, http.MethodGet, accountPath, nil)
+	require.Equal(t, http.StatusForbidden, forbiddenRead.Code)
+	forbiddenUpdate := performJSONRequest(
+		t,
+		router,
+		otherUserToken,
+		http.MethodPut,
+		accountPath,
+		map[string]string{"name": "Stolen Account"},
+	)
+	require.Equal(t, http.StatusForbidden, forbiddenUpdate.Code)
+	forbiddenDelete := performJSONRequest(t, router, otherUserToken, http.MethodDelete, accountPath, nil)
+	require.Equal(t, http.StatusForbidden, forbiddenDelete.Code)
+
+	updateResponse := performJSONRequest(
+		t,
+		router,
+		ownerToken,
+		http.MethodPut,
+		accountPath,
+		map[string]string{"name": "Emergency Fund"},
+	)
+	require.Equal(t, http.StatusOK, updateResponse.Code)
+	var updatedAccount AccountResponse
+	require.NoError(t, json.NewDecoder(updateResponse.Body).Decode(&updatedAccount))
+	assert.Equal(t, "Emergency Fund", updatedAccount.Name)
+
+	deleteResponse := performJSONRequest(t, router, ownerToken, http.MethodDelete, accountPath, nil)
+	require.Equal(t, http.StatusOK, deleteResponse.Code)
+
+	missingResponse := performJSONRequest(t, router, ownerToken, http.MethodGet, accountPath, nil)
+	require.Equal(t, http.StatusNotFound, missingResponse.Code)
+}
+
+// Add more handler tests as needed (mock dependencies for full coverage)

@@ -24,10 +24,12 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 
 	bankdocs "github.com/mustafa-oezdemir/banking_go/docs"
-	"github.com/mustafa-oezdemir/banking_go/internal/api"
-	"github.com/mustafa-oezdemir/banking_go/internal/db"
-	emailservice "github.com/mustafa-oezdemir/banking_go/internal/email"
-	"github.com/mustafa-oezdemir/banking_go/internal/service"
+	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	"github.com/mustafa-oezdemir/banking_go/internal/payment"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/bootstrap"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	emailservice "github.com/mustafa-oezdemir/banking_go/internal/platform/email"
+	api "github.com/mustafa-oezdemir/banking_go/internal/platform/httpapi"
 )
 
 func initLogger() {
@@ -251,11 +253,11 @@ func main() {
 	}()
 
 	store := db.NewStore(dbConn)
-	ledgerSvc := service.NewLedgerService(store)
-	eventHub := service.NewEventHub()
-	paymentSvc := service.NewPaymentService(store, eventHub)
+	ledgerSvc := ledger.NewLedgerService(store)
+	eventHub := payment.NewEventHub()
+	paymentSvc := payment.NewPaymentService(store, eventHub)
 	seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if seedErr := service.SeedConfiguredAdmin(seedCtx, store, ledgerSvc); seedErr != nil {
+	if seedErr := bootstrap.SeedConfiguredAdmin(seedCtx, store, ledgerSvc); seedErr != nil {
 		seedCancel()
 		zlog.Fatal().Err(seedErr).Msg("Configured administrator seed failed")
 	}
@@ -264,7 +266,7 @@ func main() {
 		zlog.Warn().Msg("Fictional demo seed skipped: DEMO_SEED_PASSWORD must contain between 15 and 72 bytes")
 	} else if demoSeedRequested() {
 		seedCtx, seedCancel = context.WithTimeout(context.Background(), 30*time.Second)
-		if seedErr := service.SeedDemoData(seedCtx, store, ledgerSvc, paymentSvc); seedErr != nil {
+		if seedErr := bootstrap.SeedDemoData(seedCtx, store, ledgerSvc, paymentSvc); seedErr != nil {
 			seedCancel()
 			zlog.Fatal().Err(seedErr).Msg("Demo seed failed")
 		}
