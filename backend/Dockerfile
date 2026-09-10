@@ -1,5 +1,5 @@
 # Build application binary and migration tool
-FROM golang:1.26.8-alpine AS builder
+FROM golang:1.27.1-alpine AS builder
 WORKDIR /src
 
 COPY backend/go.mod backend/go.sum ./
