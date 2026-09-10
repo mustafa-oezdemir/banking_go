@@ -53,6 +53,10 @@ const nextConfig: NextConfig = {
           source: "/session",
           destination: `${apiBaseUrl}/session`,
         },
+		{
+			source: "/profile",
+			destination: `${apiBaseUrl}/profile`,
+		},
         // Proxy accounts endpoints (both /accounts and /accounts/*)
         {
           source: "/accounts",

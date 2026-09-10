@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -581,8 +582,18 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 
 func decodeStrictJSON(r *http.Request, target any) error {
 	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain a single JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func ownerAndPathID(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {

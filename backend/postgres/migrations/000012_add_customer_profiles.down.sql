@@ -1,0 +1,16 @@
+ALTER TABLE users
+    DROP CONSTRAINT IF EXISTS users_birth_date_check,
+    DROP CONSTRAINT IF EXISTS users_country_code_check,
+    DROP CONSTRAINT IF EXISTS users_city_length_check,
+    DROP CONSTRAINT IF EXISTS users_postal_code_length_check,
+    DROP CONSTRAINT IF EXISTS users_address_line2_length_check,
+    DROP CONSTRAINT IF EXISTS users_address_line1_length_check,
+    DROP CONSTRAINT IF EXISTS users_phone_length_check,
+    DROP COLUMN IF EXISTS updated_at,
+    DROP COLUMN IF EXISTS country_code,
+    DROP COLUMN IF EXISTS city,
+    DROP COLUMN IF EXISTS postal_code,
+    DROP COLUMN IF EXISTS address_line2,
+    DROP COLUMN IF EXISTS address_line1,
+    DROP COLUMN IF EXISTS birth_date,
+    DROP COLUMN IF EXISTS phone;

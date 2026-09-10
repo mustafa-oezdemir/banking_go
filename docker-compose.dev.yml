@@ -1,0 +1,63 @@
+services:
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    profiles: ["dev"]
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_HTTP_PORT:-8425}:8025"
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    profiles: ["dev"]
+    volumes:
+      - ./backend/postgres/migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - -path=/migrations
+      - -database=postgresql://${DB_USER:-root}:${DB_PASSWORD:-secret}@db:5432/${DB_NAME:-simple_ledger}?sslmode=disable
+      - up
+
+  backend-dev:
+    image: alpine:3.21
+    profiles: ["dev"]
+    working_dir: /app
+    command: ["/usr/local/bin/ledger"]
+    restart: unless-stopped
+    volumes:
+      - ./backend/bin/linux/ledger:/usr/local/bin/ledger:ro
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-simple_ledger}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_SSLMODE: disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      DEMO_SEED: ${DEMO_SEED:-false}
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
+      ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+      ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-Pehlione DemoBank <banking@pehlione.com>}
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      PORT: 8080
+    ports:
+      # Keep clear of common Hyper-V/WSL exclusions and desktop app ports.
+      - "${BACKEND_DEV_PORT:-8383}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s

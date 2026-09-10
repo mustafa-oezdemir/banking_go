@@ -142,19 +142,63 @@ func TestLedgerRejectsBlockedAndSystemAccounts(t *testing.T) {
 
 func TestTransferRejectsBlockedDestinationWithoutChangingBalances(t *testing.T) {
 	ledger := setupTestLedger(t)
-	fromID := createTestAccount(t, ledger, "100.00")
+	owner, err := ledger.store.CreateUser(t.Context(), sqlc.CreateUserParams{
+		Email: "transfer-owner-" + uuid.NewString() + "@example.com", HashedPassword: "test-only", FullName: "Transfer Owner",
+	})
+	require.NoError(t, err)
 	settlement, err := ledger.store.GetSettlementAccount(context.Background())
 	require.NoError(t, err)
+	from, err := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
+		OwnerID: uuid.NullUUID{UUID: owner.ID, Valid: true}, Name: "Transfer source " + uuid.NewString(), Currency: settlement.Currency,
+		IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "ACTIVE",
+	})
+	require.NoError(t, err)
+	require.NoError(t, ledger.Deposit(context.Background(), from.ID, "100.00"))
 	blocked, err := ledger.store.CreateAccount(context.Background(), sqlc.CreateAccountParams{
-		OwnerID: uuid.NullUUID{}, Name: "Blocked target " + uuid.NewString(), Currency: settlement.Currency,
+		OwnerID: uuid.NullUUID{UUID: owner.ID, Valid: true}, Name: "Blocked target " + uuid.NewString(), Currency: settlement.Currency,
 		IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "BLOCKED",
 	})
 	require.NoError(t, err)
 
-	require.ErrorIs(t, ledger.Transfer(context.Background(), fromID, blocked.ID, "25.00"), ErrAccountBlocked)
-	require.ErrorIs(t, ledger.Transfer(context.Background(), fromID, settlement.ID, "25.00"), ErrSystemAccount)
-	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, fromID))
+	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, blocked.ID, "25.00"), ErrAccountBlocked)
+	require.ErrorIs(t, ledger.Transfer(context.Background(), owner.ID, from.ID, settlement.ID, "25.00"), ErrSystemAccount)
+	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, from.ID))
 	assert.Equal(t, "0.0000", getAccountBalance(t, ledger, blocked.ID))
+}
+
+func TestTransferRequiresSameOwnerForBothAccounts(t *testing.T) {
+	ledger := setupTestLedger(t)
+	settlement, err := ledger.store.GetSettlementAccount(t.Context())
+	require.NoError(t, err)
+	createOwner := func(label string) sqlc.CreateUserRow {
+		user, createErr := ledger.store.CreateUser(t.Context(), sqlc.CreateUserParams{
+			Email: label + "-" + uuid.NewString() + "@example.com", HashedPassword: "test-only", FullName: label,
+		})
+		require.NoError(t, createErr)
+		return user
+	}
+	createAccount := func(ownerID uuid.UUID, label string) sqlc.Account {
+		account, createErr := ledger.store.CreateAccount(t.Context(), sqlc.CreateAccountParams{
+			OwnerID: uuid.NullUUID{UUID: ownerID, Valid: true}, Name: label, Currency: settlement.Currency,
+			IsSystem: false, Iban: mustDemoIBAN(t), AccountType: "GIROKONTO", Status: "ACTIVE",
+		})
+		require.NoError(t, createErr)
+		return account
+	}
+
+	owner := createOwner("Owner")
+	other := createOwner("Other")
+	source := createAccount(owner.ID, "Source")
+	ownedDestination := createAccount(owner.ID, "Owned destination")
+	foreignDestination := createAccount(other.ID, "Foreign destination")
+	require.NoError(t, ledger.Deposit(t.Context(), source.ID, "100.00"))
+
+	require.ErrorIs(t, ledger.Transfer(t.Context(), owner.ID, source.ID, foreignDestination.ID, "10.00"), ErrAccountOwnership)
+	assert.Equal(t, "100.0000", getAccountBalance(t, ledger, source.ID))
+	assert.Equal(t, "0.0000", getAccountBalance(t, ledger, foreignDestination.ID))
+	require.NoError(t, ledger.Transfer(t.Context(), owner.ID, source.ID, ownedDestination.ID, "10.00"))
+	assert.Equal(t, "90.0000", getAccountBalance(t, ledger, source.ID))
+	assert.Equal(t, "10.0000", getAccountBalance(t, ledger, ownedDestination.ID))
 }
 
 func TestAdminBalanceAdjustmentCreatesAuditAtomically(t *testing.T) {

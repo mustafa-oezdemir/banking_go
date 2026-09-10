@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSCommandPath
+$backendDevPort = if ($env:BACKEND_DEV_PORT) { $env:BACKEND_DEV_PORT } else { "8383" }
 Set-Location -LiteralPath $projectRoot
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -18,7 +19,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($Stop) {
-    & docker compose down
+    & docker compose -f docker-compose.yml -f docker-compose.dev.yml down
     exit $LASTEXITCODE
 }
 
@@ -68,27 +69,83 @@ if (-not $jwtMatch.Success -or $jwtMatch.Groups[1].Value.Trim().Length -lt 32) {
     Write-Host "Guvenli JWT_SECRET otomatik olusturuldu." -ForegroundColor Yellow
 }
 
-$dockerArguments = @("compose", "up", "-d")
-if (-not $NoBuild) {
-    $dockerArguments += "--build"
-}
-$dockerArguments += @("--wait", "--wait-timeout", "240")
-
-Write-Host "Database, backend ve frontend baslatiliyor..." -ForegroundColor Cyan
-& docker @dockerArguments
+Write-Host "PostgreSQL ve MailHog bagimliliklari baslatiliyor..." -ForegroundColor Cyan
+& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 120 db mailhog
 if ($LASTEXITCODE -ne 0) {
     & docker compose ps -a
     & docker compose logs --tail 80
-    throw "Servisler baslatilamadi. Yukaridaki Docker loglarini kontrol edin."
+    throw "PostgreSQL baslatilamadi. Yukaridaki Docker loglarini kontrol edin."
+}
+
+if (-not $NoBuild) {
+    Write-Host "Linux backend binary Mage ile derleniyor..." -ForegroundColor Cyan
+    Push-Location -LiteralPath (Join-Path $projectRoot "backend")
+    try {
+        $env:MAGEFILE_CACHE = Join-Path $projectRoot "backend/.magecache"
+        try {
+            & mage -v build:linux
+        }
+        catch {
+            Write-Host "Yerel mage calistirilamadi; ayni Mage surumu go run ile baslatiliyor..." -ForegroundColor Yellow
+            & go run github.com/magefile/mage@v1.17.2 -v build:linux
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Backend binary derlenemedi."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+$binaryPath = Join-Path $projectRoot "backend/bin/linux/ledger"
+if (-not (Test-Path -LiteralPath $binaryPath)) {
+    throw "Backend binary bulunamadi: $binaryPath. .\start.ps1 komutunu -NoBuild olmadan calistirin."
+}
+
+Write-Host "Veritabani migration'lari uygulanıyor..." -ForegroundColor Cyan
+& docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm migrate
+if ($LASTEXITCODE -ne 0) {
+    throw "Veritabani migration'lari uygulanamadi."
+}
+
+Write-Host "Linux backend binary container icinde baslatiliyor..." -ForegroundColor Cyan
+& docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait --wait-timeout 120 backend-dev
+if ($LASTEXITCODE -ne 0) {
+    & docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail 80 backend-dev
+    throw "Backend baslatilamadi."
+}
+
+$frontendPath = Join-Path $projectRoot "frontend"
+if (-not (Test-Path -LiteralPath (Join-Path $frontendPath "node_modules/next/package.json"))) {
+    Write-Host "Frontend npm bagimliliklari kuruluyor..." -ForegroundColor Cyan
+    Push-Location -LiteralPath $frontendPath
+    try {
+        & npm install --no-package-lock
+        if ($LASTEXITCODE -ne 0) {
+            throw "Frontend bagimliliklari kurulamadi."
+        }
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 Write-Host ""
-Write-Host "Tum servisler hazir." -ForegroundColor Green
+Write-Host "Backend ve PostgreSQL hazir; frontend gelistirme sunucusu baslatiliyor." -ForegroundColor Green
 Write-Host "Frontend : http://localhost:3000"
-Write-Host "Backend  : http://localhost:8080"
-Write-Host "Swagger  : http://localhost:8080/swagger/index.html"
+Write-Host "Backend  : http://localhost:$backendDevPort"
+Write-Host "Swagger  : http://localhost:$backendDevPort/swagger/index.html"
+Write-Host "MailHog  : http://localhost:8425"
 Write-Host "Database : localhost:5433"
+Write-Host "Durdurmak icin frontend terminalinde Ctrl+C, ardindan: .\start.ps1 -Stop"
 Write-Host ""
-Write-Host "Durdurmak icin: .\start.ps1 -Stop"
 
-& docker compose ps
+Push-Location -LiteralPath $frontendPath
+try {
+    $env:BACKEND_API_URL = "http://localhost:$backendDevPort"
+    & npm run dev
+}
+finally {
+    Pop-Location
+}

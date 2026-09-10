@@ -32,7 +32,7 @@ Every new customer receives a fictional EUR Girokonto, a valid demo IBAN and a b
 | Responsive German UI | Standard and instant transfers | HttpOnly session cookies |
 | Collapsible desktop/mobile drawer | Scheduled payments | CSRF and CORS protection |
 | IBAN reveal, copy and share | Standing orders | Endpoint rate limits |
-| Account and transaction views | Verification of Payee | Masked IBAN responses |
+| Account, transaction and profile views | Verification of Payee | Masked IBAN responses |
 | Admin user/account controls | Idempotency keys | Strict JSON validation |
 | SSE updates with polling fallback | Atomic debit and credit entries | Audit events and CodeQL |
 
@@ -94,6 +94,7 @@ docker compose up --build
 | Banking UI | [localhost:3000](http://localhost:3000) |
 | API health | [localhost:8080/health](http://localhost:8080/health) |
 | Swagger UI | [localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) |
+| MailHog inbox (hybrid development) | [localhost:8425](http://localhost:8425) |
 | PostgreSQL | `localhost:5433` |
 
 Stop the stack with `docker compose down`. Add `-v` only when you intentionally want to remove the local PostgreSQL volume.
@@ -105,7 +106,24 @@ DEMO_SEED=true
 DEMO_SEED_PASSWORD=<unique-secret-with-15-to-72-bytes>
 ```
 
-The idempotent seed creates the fictional users `anna.beispiel@demo.invalid` and `max.mustermann@demo.invalid`, demo accounts, beneficiaries and sample payments. All names, balances and transactions are fictional.
+The idempotent seed creates the fictional users `anna.beispiel@demo.invalid` and `max.mustermann@demo.invalid`, demo accounts, beneficiaries and sample payments. All names, addresses, balances and transactions must remain fictional; never enter real personal data in a demo environment.
+
+### Hybrid local development (Windows)
+
+The development launcher keeps PostgreSQL and MailHog in Docker, runs the Linux backend binary in a lightweight container, and runs Next.js natively with npm for fast refresh:
+
+```powershell
+.\start.ps1
+```
+
+The equivalent backend build command is:
+
+```powershell
+cd backend
+mage -v build:linux
+```
+
+This produces the single executable `backend/bin/linux/ledger`. PostgreSQL and migrations are managed through `docker-compose.dev.yml`; the backend is exposed on `http://localhost:8383` by default and the frontend starts with `npm run dev`. Set `BACKEND_DEV_PORT` to override the backend host port. Stop the Compose services with `.\start.ps1 -Stop`.
 
 ### Optional administrator bootstrap
 
@@ -157,6 +175,7 @@ yarn build
 | Purpose | Endpoints |
 | --- | --- |
 | Authentication | `POST /register`, `POST /login`, `POST /forgot-password`, `POST /reset-password`, `POST /logout`, `GET /session` |
+| Customer profile | `GET /profile`, `PATCH /profile` |
 | Accounts | `GET /accounts`, `GET /accounts/{id}`, `GET /accounts/{id}/transactions` |
 | Payee verification | `POST /payees/verify` |
 | Payments | `POST /payments`, `GET /payments`, `POST /payments/{id}/confirm`, `POST /payments/{id}/cancel` |
@@ -168,7 +187,9 @@ yarn build
 
 ### Transactional email
 
-Password-reset and account-activity messages are delivered through the Resend HTTPS API. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed. Deposit, withdrawal, internal transfer, SEPA booking and administrator balance adjustments enqueue an email to the address registered by the affected user.
+Password-reset and account-activity messages are delivered through SMTP in local development and the Resend HTTPS API in production. Password-reset links expire after 15 minutes, are single-use and revoke all earlier sessions when consumed. Deposit, withdrawal, internal transfer, SEPA booking and administrator balance adjustments enqueue an email to the address registered by the affected user.
+
+`./start.ps1` configures the backend to send locally through MailHog. Open [localhost:8425](http://localhost:8425) to inspect captured messages; MailHog never forwards them to the public internet.
 
 ```env
 RESEND_API_KEY=re_...
@@ -176,7 +197,7 @@ MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
 FRONTEND_URL=https://pehlione-banking-frontend.onrender.com
 ```
 
-The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit the API key. Email delivery is intentionally decoupled from ledger commits: a provider outage is logged but never rolls back or duplicates a financial transaction.
+When `SMTP_HOST` is configured it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. Email delivery is intentionally decoupled from ledger commits: a provider outage is logged but never rolls back or duplicates a financial transaction.
 
 ## Render deployment
 
@@ -206,10 +227,12 @@ See Render's current [free service limits](https://render.com/docs/free) and [Bl
 - Cookies use Secure, HttpOnly and SameSite protections in production.
 - CSRF checks, CORS allowlists and rate limits protect sensitive endpoints.
 - Strict request decoding reduces mass-assignment risk.
+- Profile changes are owner-scoped and audited without copying address or contact data into audit metadata.
 - Stable locking and transactional writes prevent partial ledger updates.
 - Logs must never contain credentials, JWTs or unmasked personal data.
 
 Read the repository's [security pentest report](SECURITY_PENTEST_REPORT.md) for the implemented findings and mitigations.
+For a control-by-control source file map and the remaining real-bank requirements, see [CYBER_SECURITY.md](CYBER_SECURITY.md) or the [German version](CYBER_SECURITY_DE.md).
 
 ## Project structure
 

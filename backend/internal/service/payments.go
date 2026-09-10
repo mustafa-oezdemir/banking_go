@@ -451,8 +451,8 @@ func validatePaymentInput(input CreatePaymentInput) (decimal.Decimal, error) {
 	if err := sepa.ValidateIBAN(input.BeneficiaryIBAN); err != nil {
 		return decimal.Zero, err
 	}
-	amount, err := decimal.NewFromString(input.Amount)
-	if err != nil || amount.LessThanOrEqual(decimal.Zero) || amount.Exponent() < -2 {
+	amount, err := parseEURAmount(input.Amount)
+	if err != nil {
 		return decimal.Zero, ErrInvalidAmount
 	}
 	if utf8.RuneCountInString(input.Purpose) > 140 {

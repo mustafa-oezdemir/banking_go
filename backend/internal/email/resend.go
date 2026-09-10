@@ -1,4 +1,4 @@
-// Package email sends transactional email through the Resend HTTPS API.
+// Package email sends transactional email through SMTP or the Resend HTTPS API.
 package email
 
 import (
@@ -33,10 +33,14 @@ const (
 
 // Config contains Resend delivery settings.
 type Config struct {
-	APIKey      string
-	From        string
-	FrontendURL string
-	Endpoint    string
+	APIKey       string
+	From         string
+	FrontendURL  string
+	Endpoint     string
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUser     string
+	SMTPPassword string
 }
 
 // Service delivers password-reset messages synchronously and account activity
@@ -53,10 +57,14 @@ func NewFromEnvironment(store *db.Store) *Service {
 	from := firstNonEmpty(os.Getenv("MAIL_FROM"), os.Getenv("RESEND_FROM_EMAIL"), defaultFromAddress)
 	frontendURL := firstNonEmpty(os.Getenv("FRONTEND_URL"), defaultFrontendURL)
 	return NewService(store, Config{
-		APIKey:      strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
-		From:        from,
-		FrontendURL: frontendURL,
-		Endpoint:    defaultResendEndpoint,
+		APIKey:       strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
+		From:         from,
+		FrontendURL:  frontendURL,
+		Endpoint:     defaultResendEndpoint,
+		SMTPHost:     strings.TrimSpace(os.Getenv("SMTP_HOST")),
+		SMTPPort:     firstNonEmpty(os.Getenv("SMTP_PORT"), "1025"),
+		SMTPUser:     strings.TrimSpace(os.Getenv("SMTP_USER")),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 	}, &http.Client{Timeout: 10 * time.Second})
 }
 
@@ -66,6 +74,12 @@ func NewService(store *db.Store, config Config, client *http.Client) *Service {
 	config.From = strings.TrimSpace(config.From)
 	config.FrontendURL = strings.TrimRight(strings.TrimSpace(config.FrontendURL), "/")
 	config.Endpoint = strings.TrimSpace(config.Endpoint)
+	config.SMTPHost = strings.TrimSpace(config.SMTPHost)
+	config.SMTPPort = strings.TrimSpace(config.SMTPPort)
+	config.SMTPUser = strings.TrimSpace(config.SMTPUser)
+	if config.SMTPPort == "" {
+		config.SMTPPort = "1025"
+	}
 	if config.Endpoint == "" {
 		config.Endpoint = defaultResendEndpoint
 	}
@@ -84,7 +98,19 @@ func NewService(store *db.Store, config Config, client *http.Client) *Service {
 
 // Enabled reports whether all required delivery settings are present.
 func (s *Service) Enabled() bool {
-	return s != nil && s.config.APIKey != "" && s.config.From != "" && s.config.FrontendURL != ""
+	return s != nil && s.config.From != "" && s.config.FrontendURL != "" &&
+		(s.config.SMTPHost != "" || s.config.APIKey != "")
+}
+
+// Provider identifies the configured delivery transport for startup diagnostics.
+func (s *Service) Provider() string {
+	if s == nil || !s.Enabled() {
+		return "disabled"
+	}
+	if s.config.SMTPHost != "" {
+		return "smtp"
+	}
+	return "resend"
 }
 
 // SendPasswordReset sends a 15-minute password reset link to one user.
@@ -159,6 +185,9 @@ func (s *Service) sendActivity(ctx context.Context, activity notification.Activi
 }
 
 func (s *Service) send(ctx context.Context, recipient, subject, htmlBody, textBody string) error {
+	if s.config.SMTPHost != "" {
+		return s.sendSMTP(ctx, recipient, subject, htmlBody, textBody)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"from": s.config.From, "to": []string{recipient}, "subject": subject,
 		"html": htmlBody, "text": textBody,

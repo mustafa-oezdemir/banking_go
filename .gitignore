@@ -20,6 +20,7 @@ bin*
 *sh
 test-results*
 *.log
+.magecache/
 freecodecamp*
 Tutorial*
 article*

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -104,6 +105,32 @@ func TestRequireJSON(t *testing.T) {
 	rw := httptest.NewRecorder()
 	handler.ServeHTTP(rw, req)
 	assert.Equal(t, http.StatusUnsupportedMediaType, rw.Code)
+}
+
+func TestDecodeStrictJSON(t *testing.T) {
+	t.Run("preserves numeric amount without float conversion", func(t *testing.T) {
+		var input struct {
+			Amount interface{} `json:"amount"`
+		}
+		req := httptest.NewRequest(http.MethodPost, "/transfers", strings.NewReader(`{"amount":9007199254740993}`))
+		require.NoError(t, decodeStrictJSON(req, &input))
+		amount, ok := input.Amount.(json.Number)
+		require.True(t, ok)
+		assert.Equal(t, "9007199254740993", amount.String())
+	})
+
+	for name, body := range map[string]string{
+		"unknown field": `{"amount":"1.00","admin":true}`,
+		"trailing JSON": `{"amount":"1.00"}{"amount":"2.00"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var input struct {
+				Amount interface{} `json:"amount"`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/transfers", strings.NewReader(body))
+			require.Error(t, decodeStrictJSON(req, &input))
+		})
+	}
 }
 
 func TestRequireActiveSessionRejectsRevokedToken(t *testing.T) {

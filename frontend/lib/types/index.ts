@@ -8,6 +8,26 @@ export interface User {
 	role: "CUSTOMER" | "ADMIN";
 }
 
+export interface CustomerProfile {
+	id: string;
+	email: string;
+	full_name: string;
+	phone: string;
+	birth_date: string;
+	address_line1: string;
+	address_line2: string;
+	postal_code: string;
+	city: string;
+	country_code: string;
+	updated_at: string;
+	profile_complete: boolean;
+}
+
+export type CustomerProfileUpdate = Pick<CustomerProfile,
+	"full_name" | "phone" | "birth_date" | "address_line1" | "address_line2" |
+	"postal_code" | "city" | "country_code"
+>;
+
 export interface AdminUser {
 	id: string;
 	email: string;

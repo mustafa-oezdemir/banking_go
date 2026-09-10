@@ -13,15 +13,17 @@ import {
 	getPayments,
 	getStandingOrders,
 	getSession,
+	getProfile,
 	getAdminOverview,
 	updateAdminUserRole,
 	updateAdminAccountStatus,
 	adjustAdminAccountBalance,
 	logoutSession,
 	updateStandingOrder,
+	updateProfile,
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import type { Account, AdminOverview, Beneficiary, Entry, Payment, StandingOrder } from "@/lib/types";
+import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, Payment, StandingOrder } from "@/lib/types";
 import { TransferWizard } from "./TransferWizard";
 
 type View = "overview" | "accounts" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
@@ -206,7 +208,7 @@ export function BankingApp() {
 							{view === "scheduled" && <Scheduled payments={payments} onCancel={async (id) => { await cancelPayment(id); await loadAll(); }} onCreate={() => setView("transfer")} />}
 							{view === "standing" && <Standing orders={standingOrders} onCreate={() => setView("transfer")} onToggle={async (order) => { await updateStandingOrder(order.id, { amount: order.amount, purpose: order.purpose, status: order.status === "ACTIVE" ? "PAUSED" : "ACTIVE", end_date: order.end_date, max_occurrences: order.max_occurrences }); await loadAll(); }} onDelete={async (id) => { await deleteStandingOrder(id); await loadAll(); }} />}
 							{view === "beneficiaries" && <Beneficiaries items={beneficiaries} />}
-							{view === "profile" && <Profile email={email} />}
+							{view === "profile" && <ProfileSection email={email} />}
 							{view === "admin" && role === "ADMIN" && <AdminPanel />}
 						</>
 					)}
@@ -360,8 +362,67 @@ function Beneficiaries({ items }: { items: Beneficiary[] }) {
 	return <Card className="overflow-hidden">{items.length ? <div className="divide-y divide-slate-100">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 p-4"><div className="flex min-w-0 items-center gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#e8f1f8] font-bold text-[#003b70]">{item.name.charAt(0)}</div><div className="min-w-0"><p className="truncate font-semibold">{item.name}</p><p className="font-mono text-xs text-slate-500">{item.iban}</p></div></div><span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">{item.category || "Sonstiges"}</span></div>)}</div> : <Empty text="Keine gespeicherten Empfänger" />}</Card>;
 }
 
-function Profile({ email }: { email: string }) {
-	return <div className="grid gap-5 lg:grid-cols-2"><Card className="p-5"><h2 className="font-bold">Profil</h2><dl className="mt-5 space-y-4 text-sm"><div><dt className="text-slate-500">E-Mail</dt><dd className="mt-1 font-semibold">{email}</dd></div><div><dt className="text-slate-500">Umgebung</dt><dd className="mt-1 font-semibold">Fiktive SEPA-Demo</dd></div></dl></Card><Card className="p-5"><h2 className="font-bold">Sicherheit</h2><ul className="mt-5 space-y-3 text-sm text-slate-600"><li>✓ HttpOnly-Sitzungscookie</li><li>✓ SameSite- und CSRF-Schutz</li><li>✓ Serverseitige Kontoinhaberprüfung</li><li>✓ Idempotente Zahlungsaufträge</li></ul><div className="mt-5 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Die Demo-Bestätigung ist kein echtes TAN- oder SCA-Verfahren.</div></Card></div>;
+const emptyProfile: CustomerProfileUpdate = { full_name: "", phone: "", birth_date: "", address_line1: "", address_line2: "", postal_code: "", city: "", country_code: "DE" };
+
+function ProfileSection({ email }: { email: string }) {
+	const [profile, setProfile] = useState<CustomerProfile | null>(null);
+	const [form, setForm] = useState<CustomerProfileUpdate>(emptyProfile);
+	const [loadingProfile, setLoadingProfile] = useState(true);
+	const [saving, setSaving] = useState(false);
+	const [message, setMessage] = useState("");
+	const [failed, setFailed] = useState(false);
+
+	useEffect(() => {
+		let active = true;
+		void getProfile().then(({ response, data }) => {
+			if (!active) return;
+			if (!response.ok) throw new Error("Profildaten konnten nicht geladen werden.");
+			setProfile(data);
+			setForm({ full_name: data.full_name, phone: data.phone, birth_date: data.birth_date, address_line1: data.address_line1, address_line2: data.address_line2, postal_code: data.postal_code, city: data.city, country_code: data.country_code || "DE" });
+		}).catch((loadError) => {
+			if (active) { setFailed(true); setMessage(loadError instanceof Error ? loadError.message : "Profil nicht verfügbar."); }
+		}).finally(() => { if (active) setLoadingProfile(false); });
+		return () => { active = false; };
+	}, []);
+
+	const field = (key: keyof CustomerProfileUpdate) => ({
+		value: form[key],
+		onChange: (event: React.ChangeEvent<HTMLInputElement>) => setForm((current) => ({ ...current, [key]: event.target.value })),
+	});
+	const save = async (event: React.FormEvent) => {
+		event.preventDefault();
+		setSaving(true); setMessage(""); setFailed(false);
+		try {
+			const result = await updateProfile({ ...form, country_code: form.country_code.trim().toUpperCase() });
+			if (!result.response.ok) throw new Error("Profil konnte nicht gespeichert werden.");
+			setProfile(result.data);
+			setForm({ full_name: result.data.full_name, phone: result.data.phone, birth_date: result.data.birth_date, address_line1: result.data.address_line1, address_line2: result.data.address_line2, postal_code: result.data.postal_code, city: result.data.city, country_code: result.data.country_code });
+			setMessage("Ihre Profildaten wurden gespeichert.");
+		} catch (saveError) {
+			setFailed(true); setMessage(saveError instanceof Error ? saveError.message : "Profil konnte nicht gespeichert werden.");
+		} finally { setSaving(false); }
+	};
+
+	if (loadingProfile) return <Loading />;
+	return <div className="grid gap-5 xl:grid-cols-[1.35fr_.65fr]">
+		<Card className="p-5 md:p-6">
+			<div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">Persönliche Daten</h2><p className="mt-1 text-sm text-slate-500">Halten Sie Ihre Kontakt- und Adressdaten aktuell.</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${profile?.profile_complete ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{profile?.profile_complete ? "Profil vollständig" : "Profil ergänzen"}</span></div>
+			{message && <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${failed ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{message}</div>}
+			<form onSubmit={save} className="mt-6 grid gap-4 md:grid-cols-2">
+				<label className="text-sm font-semibold text-slate-700 md:col-span-2">E-Mail-Adresse<input value={profile?.email || email} readOnly className="bank-input mt-1.5 bg-slate-50 text-slate-500" autoComplete="email" /><span className="mt-1 block text-xs font-normal text-slate-400">Eine Änderung erfordert zukünftig eine separate Verifizierung.</span></label>
+				<label className="text-sm font-semibold text-slate-700 md:col-span-2">Vollständiger Name<input {...field("full_name")} required minLength={2} maxLength={100} className="bank-input mt-1.5" autoComplete="name" /></label>
+				<label className="text-sm font-semibold text-slate-700">Telefonnummer<input {...field("phone")} required minLength={7} maxLength={32} className="bank-input mt-1.5" autoComplete="tel" placeholder="+49 170 1234567" /></label>
+				<label className="text-sm font-semibold text-slate-700">Geburtsdatum<input {...field("birth_date")} required type="date" max={new Date().toISOString().slice(0, 10)} className="bank-input mt-1.5" autoComplete="bday" /></label>
+				<label className="text-sm font-semibold text-slate-700 md:col-span-2">Straße und Hausnummer<input {...field("address_line1")} required minLength={3} maxLength={120} className="bank-input mt-1.5" autoComplete="address-line1" placeholder="Musterstraße 12" /></label>
+				<label className="text-sm font-semibold text-slate-700 md:col-span-2">Adresszusatz <span className="font-normal text-slate-400">(optional)</span><input {...field("address_line2")} maxLength={120} className="bank-input mt-1.5" autoComplete="address-line2" placeholder="Wohnung, Etage oder c/o" /></label>
+				<label className="text-sm font-semibold text-slate-700">Postleitzahl<input {...field("postal_code")} required minLength={3} maxLength={12} className="bank-input mt-1.5" autoComplete="postal-code" /></label>
+				<label className="text-sm font-semibold text-slate-700">Ort<input {...field("city")} required minLength={2} maxLength={80} className="bank-input mt-1.5" autoComplete="address-level2" /></label>
+				<label className="text-sm font-semibold text-slate-700">Ländercode<input {...field("country_code")} required minLength={2} maxLength={2} className="bank-input mt-1.5 uppercase" autoComplete="country" placeholder="DE" /></label>
+				<div className="flex items-end md:justify-end"><button type="submit" disabled={saving} className="bank-primary w-full disabled:cursor-not-allowed disabled:opacity-60 md:w-auto">{saving ? "Wird gespeichert…" : "Änderungen speichern"}</button></div>
+			</form>
+		</Card>
+		<div className="space-y-5"><Card className="p-5"><h2 className="font-bold">Sicherheit</h2><ul className="mt-5 space-y-3 text-sm text-slate-600"><li>✓ HttpOnly-Sitzungscookie</li><li>✓ SameSite- und CSRF-Schutz</li><li>✓ Serverseitige Kontoinhaberprüfung</li><li>✓ Idempotente Zahlungsaufträge</li></ul><div className="mt-5 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Die Demo-Bestätigung ist kein echtes TAN- oder SCA-Verfahren.</div></Card><Card className="p-5"><h2 className="font-bold">Datenschutz</h2><p className="mt-3 text-sm leading-6 text-slate-600">Profildaten werden nur im authentifizierten Bereich angezeigt. Änderungen werden ohne persönliche Feldwerte im Audit protokolliert.</p><p className="mt-3 text-xs text-slate-400">Demo-System – verwenden Sie keine echten personenbezogenen Daten.</p></Card></div>
+	</div>;
 }
 
 function AdminPanel() {

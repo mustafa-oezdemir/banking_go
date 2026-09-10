@@ -262,9 +262,9 @@ func main() {
 	emailSvc := emailservice.NewFromEnvironment(store)
 	paymentSvc.SetNotificationSender(emailSvc)
 	if emailSvc.Enabled() {
-		zlog.Info().Msg("Resend transactional email delivery enabled")
+		zlog.Info().Str("provider", emailSvc.Provider()).Msg("Transactional email delivery enabled")
 	} else {
-		zlog.Warn().Msg("Transactional email disabled: configure RESEND_API_KEY and MAIL_FROM")
+		zlog.Warn().Msg("Transactional email disabled: configure SMTP_HOST or RESEND_API_KEY")
 	}
 
 	// Wire HTTP handlers with service and persistence dependencies.
@@ -336,6 +336,8 @@ func main() {
 		r.Use(api.RequireActiveSession(store))
 
 		r.Get("/session", h.Session)
+		r.Get("/profile", h.GetProfile)
+		r.Patch("/profile", h.UpdateProfile)
 		r.Post("/accounts", h.CreateAccount)
 		r.Get("/accounts", h.ListAccounts)
 		r.Get("/accounts/{id}", h.GetAccount)

@@ -46,6 +46,7 @@ export const API_ENDPOINTS = {
   RESET_PASSWORD: "/reset-password",
   LOGOUT: "/logout",
   SESSION: "/session",
+	PROFILE: "/profile",
   ACCOUNTS: "/accounts",
   ACCOUNT: (accountId: string) => `/accounts/${accountId}`,
   DEPOSIT: (accountId: string) => `/accounts/${accountId}/deposit`,

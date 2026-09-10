@@ -203,6 +203,52 @@ definitions:
       transfer_type:
         type: string
     type: object
+  api.profileResponse:
+    properties:
+      address_line1:
+        type: string
+      address_line2:
+        type: string
+      birth_date:
+        type: string
+      city:
+        type: string
+      country_code:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      id:
+        type: string
+      phone:
+        type: string
+      postal_code:
+        type: string
+      profile_complete:
+        type: boolean
+      updated_at:
+        type: string
+    type: object
+  api.updateProfileRequest:
+    properties:
+      address_line1:
+        type: string
+      address_line2:
+        type: string
+      birth_date:
+        type: string
+      city:
+        type: string
+      country_code:
+        type: string
+      full_name:
+        type: string
+      phone:
+        type: string
+      postal_code:
+        type: string
+    type: object
   service.VoPResult:
     properties:
       demo_notice:
@@ -859,6 +905,56 @@ paths:
       summary: Confirm and book or schedule a demo payment
       tags:
       - payments
+  /profile:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.profileResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - Bearer: []
+      summary: Get the authenticated customer's profile
+      tags:
+      - profile
+    patch:
+      consumes:
+      - application/json
+      description: Updates personal and postal data. Email changes require a separate
+        verified flow.
+      parameters:
+      - description: Profile data
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.updateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.profileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - Bearer: []
+      summary: Update the authenticated customer's profile
+      tags:
+      - profile
   /register:
     post:
       consumes:
@@ -1032,9 +1128,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Transfers funds between accounts with atomic double-entry updates.
-        The amount field accepts JSON number or string. from_id/to_id are preferred;
-        from_account_id/to_account_id are supported as legacy aliases.
+      description: Transfers funds only between the authenticated customer's own accounts
+        with atomic double-entry updates. Transfers to other customers must use the
+        confirmed payments flow. The amount field accepts JSON number or string. from_id/to_id
+        are preferred; from_account_id/to_account_id are supported as legacy aliases.
       parameters:
       - description: Transfer details
         in: body

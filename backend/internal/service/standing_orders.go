@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
-
 	"github.com/mustafa-oezdemir/banking_go/internal/sepa"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
@@ -39,8 +37,8 @@ func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateSt
 	input.BeneficiaryIBAN = sepa.NormalizeIBAN(input.BeneficiaryIBAN)
 	input.TransferType = strings.ToUpper(strings.TrimSpace(input.TransferType))
 	input.Frequency = strings.ToUpper(strings.TrimSpace(input.Frequency))
-	amount, err := decimal.NewFromString(input.Amount)
-	if err != nil || amount.LessThanOrEqual(decimal.Zero) || amount.Exponent() < -2 || input.BeneficiaryName == "" {
+	amount, err := parseEURAmount(input.Amount)
+	if err != nil || input.BeneficiaryName == "" {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
 	}
 	if validationErr := sepa.ValidateIBAN(input.BeneficiaryIBAN); validationErr != nil {
@@ -97,8 +95,8 @@ func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateSt
 
 // UpdateStandingOrder changes the mutable fields of an owner-authorized standing order.
 func (s *PaymentService) UpdateStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID, amount, purpose, status string, endDate *time.Time, maxOccurrences *int32) (sqlc.StandingOrder, error) {
-	value, err := decimal.NewFromString(amount)
-	if err != nil || value.LessThanOrEqual(decimal.Zero) || value.Exponent() < -2 {
+	value, err := parseEURAmount(amount)
+	if err != nil {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
 	}
 	status = strings.ToUpper(strings.TrimSpace(status))

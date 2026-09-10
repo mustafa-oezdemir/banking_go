@@ -23,14 +23,16 @@ var (
 	ErrInsufficientFunds = errors.New("insufficient funds")
 	// ErrSameAccountTransfer is returned when a transfer uses the same source and destination account.
 	ErrSameAccountTransfer = errors.New("cannot transfer to the same account")
-	// ErrInvalidAmount is returned when the provided amount is zero or negative.
-	ErrInvalidAmount = errors.New("amount must be positive")
+	// ErrInvalidAmount is returned when an amount is non-positive, over-precise, or out of range.
+	ErrInvalidAmount = errors.New("amount must be positive, use at most two decimals, and fit the supported range")
 	// ErrCurrencyMismatch is returned when accounts involved in an operation use different currencies.
 	ErrCurrencyMismatch = errors.New("currency mismatch")
 	// ErrAccountNotFound is returned when an expected account does not exist.
 	ErrAccountNotFound = errors.New("account not found")
 	// ErrSystemAccount is returned when a customer operation targets an internal ledger account.
 	ErrSystemAccount = errors.New("system accounts cannot be used for customer operations")
+	// ErrAccountOwnership is returned when a customer operation targets an account they do not own.
+	ErrAccountOwnership = errors.New("account ownership check failed")
 )
 
 // LedgerService coordinates double-entry operations on accounts.
@@ -297,9 +299,15 @@ func (s *LedgerService) AdjustBalanceAsAdmin(
 	})
 }
 
-// Transfer between two user accounts
-func (s *LedgerService) Transfer(ctx context.Context, fromID, toID uuid.UUID, amountStr string) error {
+// Transfer moves money only between accounts owned by the same authenticated
+// customer. Transfers to another customer must use PaymentService so VoP,
+// explicit confirmation, idempotency, and the payment state machine cannot be
+// bypassed through this legacy endpoint.
+func (s *LedgerService) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID, amountStr string) error {
 	// Step 1: Validate amount and reject self-transfers immediately.
+	if ownerID == uuid.Nil {
+		return ErrAccountOwnership
+	}
 	amount, err := validatePositiveAmount(amountStr)
 	if err != nil {
 		return err
@@ -310,18 +318,27 @@ func (s *LedgerService) Transfer(ctx context.Context, fromID, toID uuid.UUID, am
 	}
 
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
-		// Step 2: Lock both accounts in the same transaction.
-		fromAcc, err := q.GetAccountForUpdate(ctx, fromID)
+		// Step 2: Lock both accounts in deterministic UUID order. This avoids
+		// deadlocks when two concurrent transfers move money in opposite directions.
+		accounts, err := q.ListAccountsForUpdate(ctx, []uuid.UUID{fromID, toID})
 		if err != nil {
 			return err
 		}
-
-		toAcc, err := q.GetAccountForUpdate(ctx, toID)
-		if err != nil {
-			return err
+		if len(accounts) != 2 {
+			return ErrAccountNotFound
 		}
+		accountByID := map[uuid.UUID]sqlc.Account{
+			accounts[0].ID: accounts[0],
+			accounts[1].ID: accounts[1],
+		}
+		fromAcc := accountByID[fromID]
+		toAcc := accountByID[toID]
 		if fromAcc.IsSystem || toAcc.IsSystem {
 			return ErrSystemAccount
+		}
+		if !fromAcc.OwnerID.Valid || fromAcc.OwnerID.UUID != ownerID ||
+			!toAcc.OwnerID.Valid || toAcc.OwnerID.UUID != ownerID {
+			return ErrAccountOwnership
 		}
 		if fromAcc.Status != "ACTIVE" || toAcc.Status != "ACTIVE" {
 			return ErrAccountBlocked
@@ -429,15 +446,8 @@ func (s *LedgerService) ReconcileAccount(ctx context.Context, accountID uuid.UUI
 	return true, nil
 }
 
-// validatePositiveAmount parses and validates that amount > 0
+// validatePositiveAmount retains the ledger-facing name while applying the
+// shared EUR amount policy used by all payment write paths.
 func validatePositiveAmount(amountStr string) (decimal.Decimal, error) {
-	// Parse decimal as exact value; never use floating-point for money.
-	amt, err := decimal.NewFromString(amountStr)
-	if err != nil {
-		return decimal.Zero, ErrInvalidAmount
-	}
-	if amt.LessThanOrEqual(decimal.Zero) {
-		return decimal.Zero, ErrInvalidAmount
-	}
-	return amt, nil
+	return parseEURAmount(amountStr)
 }

@@ -19,6 +19,8 @@ import type {
 	Beneficiary,
 	VoPResult,
 	AdminOverview,
+	CustomerProfile,
+	CustomerProfileUpdate,
 } from "@/lib/types";
 
 /**
@@ -144,6 +146,17 @@ export async function getSession(): Promise<ApiResponse<SessionResponse>> {
   return request<SessionResponse>(API_ENDPOINTS.SESSION);
 }
 
+export async function getProfile(): Promise<ApiResponse<CustomerProfile>> {
+	return request<CustomerProfile>(API_ENDPOINTS.PROFILE);
+}
+
+export async function updateProfile(input: CustomerProfileUpdate): Promise<ApiResponse<CustomerProfile>> {
+	return request<CustomerProfile>(API_ENDPOINTS.PROFILE, {
+		method: "PATCH",
+		body: JSON.stringify(input),
+	});
+}
+
 /**
  * End the current browser session
  */
@@ -248,7 +261,8 @@ export async function withdraw(
 }
 
 /**
- * Transfer funds between accounts
+ * Transfer funds between the authenticated customer's own accounts.
+ * Customer-to-customer and SEPA transfers use createPayment + confirmPayment.
  */
 export async function transfer(
   fromAccountId: string,

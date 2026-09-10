@@ -762,7 +762,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 // Transfer godoc
 // @Summary      Transfer money between accounts
-// @Description  Transfers funds between accounts with atomic double-entry updates. The amount field accepts JSON number or string. from_id/to_id are preferred; from_account_id/to_account_id are supported as legacy aliases.
+// @Description  Transfers funds only between the authenticated customer's own accounts with atomic double-entry updates. Transfers to other customers must use the confirmed payments flow. The amount field accepts JSON number or string. from_id/to_id are preferred; from_account_id/to_account_id are supported as legacy aliases.
 // @Tags         accounts
 // @Accept       json
 // @Produce      json
@@ -803,9 +803,7 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		FromAccountID string      `json:"from_account_id"`
 		ToAccountID   string      `json:"to_account_id"`
 	}
-	dec := json.NewDecoder(r.Body)
-	dec.UseNumber()
-	if decodeErr := dec.Decode(&input); decodeErr != nil {
+	if decodeErr := decodeStrictJSON(r, &input); decodeErr != nil {
 		log.Warn().Err(decodeErr).Msg("Failed to decode transfer request")
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
@@ -861,7 +859,8 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Authorize ownership on source account only.
+	// Step 4: Resolve the source for notification metadata. The service repeats
+	// ownership checks for both locked account rows before writing the ledger.
 	fromAcc, err := h.store.GetAccount(r.Context(), fromID)
 	if err != nil {
 		log.Warn().Err(err).Msg("Transfer failed - from account not found")
@@ -875,9 +874,14 @@ func (h *Handler) Transfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Run transfer through service layer (atomic double-entry write).
-	err = h.ledger.Transfer(r.Context(), fromID, toID, amount)
+	err = h.ledger.Transfer(r.Context(), userID, fromID, toID, amount)
 	if err != nil {
-		log.Error().Err(err).Msg("Transfer failed")
+		if errors.Is(err, service.ErrAccountOwnership) {
+			log.Warn().Msg("Transfer denied - account ownership check failed")
+			respondError(w, http.StatusForbidden, "access denied")
+			return
+		}
+		log.Warn().Err(err).Msg("Transfer failed")
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
