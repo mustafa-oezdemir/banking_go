@@ -27,16 +27,17 @@ import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProf
 import { TransferWizard } from "./TransferWizard";
 
 type View = "overview" | "accounts" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
+type NavigationIcon = "home" | "wallet" | "activity" | "send" | "calendar" | "repeat" | "users" | "settings" | "shield";
 
-const customerNavigation: Array<{ id: View; label: string; icon: string }> = [
-	{ id: "overview", label: "Übersicht", icon: "⌂" },
-	{ id: "accounts", label: "Konten", icon: "▣" },
-	{ id: "transactions", label: "Umsätze", icon: "↕" },
-	{ id: "transfer", label: "Überweisen", icon: "→" },
-	{ id: "scheduled", label: "Terminüberweisungen", icon: "◷" },
-	{ id: "standing", label: "Daueraufträge", icon: "↻" },
-	{ id: "beneficiaries", label: "Empfänger", icon: "♙" },
-	{ id: "profile", label: "Profil und Sicherheit", icon: "⚙" },
+const customerNavigation: Array<{ id: View; label: string; icon: NavigationIcon }> = [
+	{ id: "overview", label: "Übersicht", icon: "home" },
+	{ id: "accounts", label: "Konten", icon: "wallet" },
+	{ id: "transactions", label: "Umsätze", icon: "activity" },
+	{ id: "transfer", label: "Überweisen", icon: "send" },
+	{ id: "scheduled", label: "Terminüberweisungen", icon: "calendar" },
+	{ id: "standing", label: "Daueraufträge", icon: "repeat" },
+	{ id: "beneficiaries", label: "Empfänger", icon: "users" },
+	{ id: "profile", label: "Profil und Sicherheit", icon: "settings" },
 ];
 
 export function BankingApp() {
@@ -54,10 +55,11 @@ export function BankingApp() {
 	const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 	const [live, setLive] = useState(false);
 	const [error, setError] = useState("");
 	const navigation = useMemo(
-		() => role === "ADMIN" ? [...customerNavigation, { id: "admin" as View, label: "Administration", icon: "⚡" }] : customerNavigation,
+		() => role === "ADMIN" ? [...customerNavigation, { id: "admin" as View, label: "Administration", icon: "shield" as NavigationIcon }] : customerNavigation,
 		[role],
 	);
 
@@ -70,13 +72,16 @@ export function BankingApp() {
 	}, []);
 
 	useEffect(() => {
-		if (!menuOpen) return;
+		if (!menuOpen && !accountMenuOpen) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setMenuOpen(false);
+			if (event.key === "Escape") {
+				setMenuOpen(false);
+				setAccountMenuOpen(false);
+			}
 		};
 		window.addEventListener("keydown", closeOnEscape);
 		return () => window.removeEventListener("keydown", closeOnEscape);
-	}, [menuOpen]);
+	}, [accountMenuOpen, menuOpen]);
 
 	const loadAll = useCallback(async () => {
 		try {
@@ -144,60 +149,84 @@ export function BankingApp() {
 	const expenses = recentEntries.reduce((sum, entry) => sum + Number(entry.debit), 0);
 	const pending = payments.filter((payment) => ["AWAITING_CONFIRMATION", "SCHEDULED", "PROCESSING"].includes(payment.status));
 	const selectedLabel = navigation.find((item) => item.id === view)?.label ?? "Übersicht";
+	const customerName = formatCustomerName(email);
+	const customerInitial = customerName.charAt(0).toUpperCase() || "K";
 	const selectView = (nextView: View) => {
 		setView(nextView);
 		if (!window.matchMedia("(min-width: 1024px)").matches) setMenuOpen(false);
 	};
 
 	return (
-		<div className="min-h-screen bg-[#f3f5f7] text-[#17212b]">
-			<div className="bg-[#fff3cd] border-b border-[#f0d98a] px-4 py-2 text-center text-xs font-semibold text-[#634c00]">
-				Demo-Banking – kein echtes Bankkonto · Keine echten Zahlungen oder Bankverbindungen
+		<div className="min-h-screen bg-[radial-gradient(circle_at_top_right,#e8f3fb_0,transparent_30%),#f4f7fa] text-[#17212b]">
+			<div className="relative z-60 flex min-h-8 items-center justify-center gap-2 border-b border-amber-200/80 bg-amber-50 px-4 py-1.5 text-center text-[11px] font-semibold text-amber-900 sm:text-xs">
+				<span className="flex h-4 w-4 items-center justify-center rounded-full bg-amber-200 text-[10px]" aria-hidden="true">i</span>
+				<span className="sm:hidden">Demo-Banking · Fiktive Daten</span><span className="hidden sm:inline">Demo-Banking · Alle Konten, IBANs und Zahlungen sind fiktiv</span>
 			</div>
-			<header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-8">
+			<header className="sticky top-0 z-50 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 shadow-[0_1px_12px_rgba(15,23,42,.04)] backdrop-blur-xl lg:px-6">
 				<div className="flex items-center gap-3">
 					<button
 						type="button"
-						className="flex h-10 w-10 items-center justify-center rounded-lg text-2xl leading-none text-[#003b70] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0077b6]"
+						className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-[#003b70] shadow-sm transition hover:border-blue-200 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0077b6]"
 						aria-controls="banking-navigation-drawer"
 						aria-expanded={menuOpen}
 						aria-label={menuOpen ? "Navigation schließen" : "Navigation öffnen"}
 						onClick={() => setMenuOpen((open) => !open)}
 					>
-						<span aria-hidden="true">{menuOpen ? "×" : "☰"}</span>
+						<svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 fill-none stroke-current" strokeWidth="1.8"><path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" /></svg>
 					</button>
-					<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#003b70] text-lg font-bold text-white">P</div>
-					<div><div className="font-bold text-[#003b70]">Pehlione DemoBank</div><div className="text-[11px] text-slate-500">SEPA-Simulation</div></div>
+					<div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-[#0874b9] to-[#003b70] text-lg font-bold text-white shadow-[0_6px_18px_rgba(0,59,112,.2)]">P</div>
+					<div className="hidden sm:block"><div className="font-extrabold tracking-tight text-[#003b70]">Pehlione DemoBank</div><div className="text-[10px] font-semibold uppercase tracking-[.14em] text-slate-400">Digital Banking</div></div>
 				</div>
-				<div className="flex items-center gap-3">
-					<span className={`hidden rounded-full px-2 py-1 text-xs sm:inline ${live ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{live ? "● Live" : "Polling"}</span>
-					<span className="hidden max-w-52 truncate text-sm text-slate-600 md:inline">{email}</span>
-					<button onClick={signOut} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Abmelden</button>
+				<div className="flex items-center gap-2 sm:gap-3">
+					<span className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold sm:flex ${live ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}><span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-500" : "bg-slate-400"}`} />{live ? "Live" : "Synchronisiert"}</span>
+					<div className="relative">
+						<button type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} aria-label={`Kontomenü für ${customerName}`} onClick={() => setAccountMenuOpen((open) => !open)} className={`group flex min-h-11 items-center gap-2 rounded-2xl border bg-white p-1.5 pr-2 shadow-sm transition sm:gap-3 md:pr-3 ${accountMenuOpen ? "border-blue-300 ring-4 ring-blue-50" : "border-slate-200 hover:border-blue-200 hover:shadow-md"}`}>
+							<span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-sky-100 text-sm font-extrabold text-[#005b96] ring-1 ring-blue-100">{customerInitial}</span>
+							<span className="hidden min-w-0 text-left md:block"><span className="block max-w-40 truncate text-sm font-bold leading-tight text-slate-800">{customerName}</span><span className="mt-0.5 block max-w-40 truncate text-[10px] font-medium text-slate-400">{role === "ADMIN" ? "Administrator" : "Privatkunde"}</span></span>
+							<svg aria-hidden="true" viewBox="0 0 20 20" className={`h-4 w-4 fill-slate-400 transition-transform ${accountMenuOpen ? "rotate-180" : ""}`}><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" /></svg>
+						</button>
+						{accountMenuOpen && <>
+							<div aria-hidden="true" className="fixed inset-0 z-40" onClick={() => setAccountMenuOpen(false)} />
+							<div role="menu" aria-label="Kontomenü" className="absolute right-0 top-[calc(100%+12px)] z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-[20px] border border-slate-200 bg-white p-2 shadow-[0_24px_64px_rgba(15,23,42,.2)]">
+								<div className="rounded-2xl bg-gradient-to-br from-[#003b70] to-[#0874b9] p-4 text-white">
+									<div className="flex items-center gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 text-base font-extrabold ring-1 ring-white/20">{customerInitial}</span><div className="min-w-0"><p className="truncate font-bold">{customerName}</p><p className="truncate text-xs text-blue-100">{email}</p></div></div>
+									<div className="mt-3 flex items-center justify-between border-t border-white/15 pt-3 text-[11px]"><span className="rounded-full bg-white/10 px-2 py-1 font-semibold">{role === "ADMIN" ? "Administrator" : "Privatkunde"}</span><span className="flex items-center gap-1.5 text-blue-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /><span className="hidden sm:inline">Sicher angemeldet</span><span className="sm:hidden">Aktiv</span></span></div>
+								</div>
+								<div className="mt-2 space-y-1">
+									<button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); selectView("profile"); }} className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-blue-50"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500 group-hover:bg-white group-hover:text-[#0066a1]"><NavigationGlyph name="settings" /></span><span><span className="block text-sm font-bold text-slate-700">Profil & Sicherheit</span><span className="block text-[11px] text-slate-400">Persönliche Daten verwalten</span></span></button>
+									<button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); selectView("accounts"); }} className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-blue-50"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-50 text-slate-500 group-hover:bg-white group-hover:text-[#0066a1]"><NavigationGlyph name="wallet" /></span><span><span className="block text-sm font-bold text-slate-700">Meine Konten</span><span className="block text-[11px] text-slate-400">Kontostände und IBANs</span></span></button>
+								</div>
+								<div className="my-2 border-t border-slate-100" />
+								<button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); void signOut(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-rose-700 transition hover:bg-rose-50"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50"><svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current" strokeWidth="1.8"><path d="M10 17l5-5-5-5m5 5H3m10-9h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span><span className="block text-sm font-bold">Abmelden</span><span className="block text-[11px] text-rose-400">Sitzung sicher beenden</span></span></button>
+							</div>
+						</>}
+					</div>
 				</div>
 			</header>
 			{menuOpen && (
 				<button
 					type="button"
 					aria-label="Navigation schließen"
-					className="fixed inset-x-0 bottom-0 top-[97px] z-30 bg-slate-950/30 backdrop-blur-[1px] lg:hidden"
+					className="fixed inset-x-0 bottom-0 top-[104px] z-30 bg-slate-950/30 backdrop-blur-[2px] lg:hidden"
 					onClick={() => setMenuOpen(false)}
 				/>
 			)}
-			<div className="mx-auto flex max-w-[1600px]">
+			<div className="mx-auto flex max-w-[1720px]">
 				<aside
 					id="banking-navigation-drawer"
 					aria-hidden={!menuOpen}
-					className={`fixed bottom-0 left-0 top-[97px] z-40 shrink-0 overflow-x-hidden overflow-y-auto border-r border-slate-200 bg-white shadow-xl transition-[width,transform,padding] duration-300 ease-out lg:sticky lg:top-16 lg:h-[calc(100vh-64px)] lg:shadow-none ${menuOpen ? "w-72 translate-x-0 p-4 lg:w-64" : "pointer-events-none w-72 -translate-x-full p-4 lg:w-0 lg:translate-x-0 lg:border-r-0 lg:p-0"}`}
+					className={`fixed bottom-0 left-0 top-[104px] z-40 shrink-0 overflow-x-hidden overflow-y-auto border-r border-slate-200/80 bg-white/95 shadow-2xl backdrop-blur-xl transition-[width,transform,padding] duration-300 ease-out lg:sticky lg:top-[72px] lg:h-[calc(100vh-72px)] lg:shadow-none ${menuOpen ? "w-72 translate-x-0 p-4 lg:w-64 lg:p-5" : "pointer-events-none w-72 -translate-x-full p-4 lg:w-0 lg:translate-x-0 lg:border-r-0 lg:p-0"}`}
 				>
-					<div className="min-w-56">
-						<nav aria-label="Hauptnavigation" className="space-y-1">
-							{navigation.map((item) => <button key={item.id} tabIndex={menuOpen ? 0 : -1} onClick={() => selectView(item.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${view === item.id ? "bg-[#e8f1f8] font-semibold text-[#003b70]" : "text-slate-600 hover:bg-slate-50"}`}><span className="w-5 text-center text-lg">{item.icon}</span>{item.label}</button>)}
+					<div className="flex min-h-full min-w-56 flex-col">
+						<p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[.18em] text-slate-400">Banking</p>
+						<nav aria-label="Hauptnavigation" className="space-y-1.5">
+							{navigation.map((item) => <button key={item.id} tabIndex={menuOpen ? 0 : -1} onClick={() => selectView(item.id)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${view === item.id ? "bg-gradient-to-r from-[#e3f2fc] to-[#edf7fc] font-bold text-[#004b80] shadow-[inset_0_0_0_1px_rgba(0,102,161,.08)]" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${view === item.id ? "bg-white text-[#0066a1] shadow-sm" : "text-slate-400 group-hover:bg-white group-hover:text-[#0066a1] group-hover:shadow-sm"}`}><NavigationGlyph name={item.icon} /></span><span className="truncate">{item.label}</span></button>)}
 						</nav>
-						<div className="mt-8 rounded-xl bg-slate-50 p-3 text-xs text-slate-500"><strong className="block text-slate-700">Nur Demo</strong>IBANs und Umsätze sind vollständig fiktiv.</div>
+						<div className="mt-auto rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-4 text-xs text-slate-500"><div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-white text-[#0066a1] shadow-sm"><NavigationGlyph name="shield" /></div><strong className="block text-slate-800">Geschützte Demo-Umgebung</strong><span className="mt-1 block leading-relaxed">Ihre Testdaten bleiben in dieser lokalen Simulation.</span></div>
 					</div>
 				</aside>
-				<main className="min-w-0 flex-1 p-4 md:p-6 lg:p-8">
-					<div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm text-slate-500">Online-Banking</p><h1 className="text-2xl font-bold tracking-tight md:text-3xl">{selectedLabel}</h1></div><p className="text-xs text-slate-500">Stand: {new Date().toLocaleString("de-DE")}</p></div>
+				<main className="min-w-0 flex-1 p-4 md:p-6 lg:p-8 xl:p-10">
+					<div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="mb-1 text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Online-Banking</p><h1 className="text-2xl font-extrabold tracking-tight text-slate-900 md:text-3xl">{selectedLabel}</h1></div><p className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-500 shadow-sm">Stand: {new Date().toLocaleString("de-DE")}</p></div>
 					{error && <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 					{loading ? <Loading /> : (
 						<>
@@ -219,7 +248,7 @@ export function BankingApp() {
 }
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-	return <section className={`rounded-2xl border border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,.06)] ${className}`}>{children}</section>;
+	return <section className={`min-w-0 rounded-[20px] border border-slate-200/80 bg-white shadow-[0_8px_30px_rgba(15,23,42,.045)] ${className}`}>{children}</section>;
 }
 
 function Overview({ accounts, entries, payments, total, available, income, expenses, pending, onNavigate }: { accounts: Account[]; entries: Entry[]; payments: Payment[]; total: number; available: number; income: number; expenses: number; pending: number; onNavigate: (view: View) => void }) {
@@ -230,29 +259,38 @@ function Overview({ accounts, entries, payments, total, available, income, expen
 	}, [entries]);
 	const maxCategory = Math.max(...categories.map(([, amount]) => amount), 1);
 	return <div className="space-y-6">
-		<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-			<Stat label="Gesamtsaldo" value={formatCurrency(total)} accent="blue" />
-			<Stat label="Verfügbarer Betrag" value={formatCurrency(available)} accent="blue" />
+		<div className="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
+			<section className="relative min-h-64 overflow-hidden rounded-[24px] bg-gradient-to-br from-[#003b70] via-[#005b96] to-[#0983c4] p-6 text-white shadow-[0_20px_50px_rgba(0,59,112,.2)] sm:p-8">
+				<div aria-hidden="true" className="absolute -right-16 -top-24 h-64 w-64 rounded-full border-[48px] border-white/[.06]" />
+				<div aria-hidden="true" className="absolute -bottom-24 right-28 h-52 w-52 rounded-full bg-cyan-300/10 blur-2xl" />
+				<div className="relative flex h-full flex-col justify-between gap-8">
+					<div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Gesamtvermögen</p><p className="mt-3 text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl">{formatCurrency(total)}</p><p className="mt-2 text-sm text-blue-100">Davon verfügbar: <span className="font-bold text-white">{formatCurrency(available)}</span></p></div><span className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold backdrop-blur">{accounts.length} {accounts.length === 1 ? "Konto" : "Konten"}</span></div>
+					<div className="flex flex-wrap gap-3"><button onClick={() => onNavigate("transfer")} className="flex min-h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-[#004b80] shadow-lg transition hover:-translate-y-0.5 hover:bg-blue-50"><NavigationGlyph name="send" />Neue Überweisung</button><button onClick={() => onNavigate("accounts")} className="min-h-11 rounded-xl border border-white/25 bg-white/10 px-4 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20">Konten ansehen</button></div>
+				</div>
+			</section>
+			<div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
 			<Stat label="Einnahmen · 30 Tage" value={formatCurrency(income)} accent="green" />
 			<Stat label="Ausgaben · 30 Tage" value={formatCurrency(expenses)} accent="red" />
 			<Stat label="Vorgemerkt" value={String(pending)} accent="amber" />
+			</div>
 		</div>
 		<div className="grid gap-6 xl:grid-cols-[1.35fr_.65fr]">
-			<Card className="p-5"><div className="mb-4 flex items-center justify-between"><h2 className="font-bold">Meine Konten</h2><button onClick={() => onNavigate("accounts")} className="text-sm font-semibold text-[#0066a1]">Alle Konten</button></div><div className="grid gap-3 md:grid-cols-2">{accounts.map((account) => <AccountTile key={account.id} account={account} />)}</div></Card>
-			<Card className="p-5"><h2 className="mb-4 font-bold">Ausgaben nach Kategorie</h2>{categories.length ? <div className="space-y-4">{categories.map(([category, amount]) => <div key={category}><div className="mb-1 flex justify-between text-sm"><span>{category}</span><span className="font-semibold">{formatCurrency(amount)}</span></div><div className="h-2 rounded-full bg-slate-100"><div className="h-2 rounded-full bg-[#0072a8]" style={{ width: `${Math.max(8, amount / maxCategory * 100)}%` }} /></div></div>)}</div> : <Empty text="Noch keine Ausgaben" />}</Card>
+			<Card className="p-5 sm:p-6"><div className="mb-5 flex items-center justify-between"><div><p className="text-xs font-semibold text-slate-400">Portfolio</p><h2 className="mt-0.5 font-extrabold text-slate-900">Meine Konten</h2></div><button onClick={() => onNavigate("accounts")} className="rounded-lg px-2 py-1 text-sm font-bold text-[#0066a1] transition hover:bg-blue-50">Alle Konten →</button></div><div className="grid gap-3 md:grid-cols-2">{accounts.map((account) => <AccountTile key={account.id} account={account} />)}</div></Card>
+			<Card className="p-5 sm:p-6"><div className="mb-5"><p className="text-xs font-semibold text-slate-400">Letzte 30 Tage</p><h2 className="mt-0.5 font-extrabold text-slate-900">Ausgaben nach Kategorie</h2></div>{categories.length ? <div className="space-y-4">{categories.map(([category, amount], index) => <div key={category}><div className="mb-1.5 flex justify-between text-sm"><span className="font-medium text-slate-600">{category}</span><span className="font-bold tabular-nums text-slate-800">{formatCurrency(amount)}</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${index === 0 ? "bg-[#0874b9]" : index === 1 ? "bg-cyan-500" : "bg-slate-400"}`} style={{ width: `${Math.max(8, amount / maxCategory * 100)}%` }} /></div></div>)}</div> : <Empty text="Noch keine Ausgaben" />}</Card>
 		</div>
-		<Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 p-5"><h2 className="font-bold">Letzte Umsätze</h2><button onClick={() => onNavigate("transactions")} className="text-sm font-semibold text-[#0066a1]">Alle Umsätze</button></div><TransactionRows entries={entries.slice(0, 8)} /></Card>
+		<Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 p-5 sm:px-6"><div><p className="text-xs font-semibold text-slate-400">Aktivität</p><h2 className="mt-0.5 font-extrabold text-slate-900">Letzte Umsätze</h2></div><button onClick={() => onNavigate("transactions")} className="rounded-lg px-2 py-1 text-sm font-bold text-[#0066a1] transition hover:bg-blue-50">Alle Umsätze →</button></div><TransactionRows entries={entries.slice(0, 8)} /></Card>
 		{payments.some((p) => p.status === "FAILED") && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Mindestens eine Demo-Zahlung konnte nicht gebucht werden. Details finden Sie unter Terminüberweisungen.</div>}
 	</div>;
 }
 
 function Stat({ label, value, accent }: { label: string; value: string; accent: "blue" | "green" | "red" | "amber" }) {
-	const colors = { blue: "border-l-[#0066a1]", green: "border-l-emerald-500", red: "border-l-rose-500", amber: "border-l-amber-500" };
-	return <Card className={`border-l-4 p-4 ${colors[accent]}`}><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-2 text-xl font-bold tabular-nums">{value}</p></Card>;
+	const colors = { blue: "bg-blue-50 text-blue-700", green: "bg-emerald-50 text-emerald-700", red: "bg-rose-50 text-rose-700", amber: "bg-amber-50 text-amber-700" };
+	const icons: Record<typeof accent, NavigationIcon> = { blue: "wallet", green: "activity", red: "send", amber: "calendar" };
+	return <Card className="flex items-center gap-3 p-4"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${colors[accent]}`}><NavigationGlyph name={icons[accent]} /></span><div className="min-w-0"><p className="truncate text-[11px] font-semibold text-slate-500">{label}</p><p className="mt-0.5 truncate text-lg font-extrabold tabular-nums tracking-tight text-slate-900">{value}</p></div></Card>;
 }
 
 function AccountTile({ account }: { account: Account }) {
-	return <div className="rounded-xl border border-slate-200 p-4"><div className="flex justify-between"><div><p className="font-semibold">{account.name}</p><p className="mt-1 font-mono text-xs text-slate-500">{account.masked_iban}</p></div><span className="h-fit rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{account.status}</span></div><p className="mt-5 text-2xl font-bold tabular-nums">{formatCurrency(account.balance)}</p><p className="mt-1 text-xs text-slate-500">Verfügbar {formatCurrency(account.available_balance)}</p></div>;
+	return <div className="group rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg"><div className="flex justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#0066a1]"><NavigationGlyph name="wallet" /></span><div className="min-w-0"><p className="truncate font-bold text-slate-800">{account.name}</p><p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">{account.masked_iban}</p></div></div><span className="h-fit rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Aktiv</span></div><p className="mt-5 text-2xl font-extrabold tabular-nums tracking-tight text-slate-900">{formatCurrency(account.balance)}</p><p className="mt-1 text-xs font-medium text-slate-400">Verfügbar <span className="text-slate-600">{formatCurrency(account.available_balance)}</span></p></div>;
 }
 
 function Accounts({ accounts }: { accounts: Account[] }) {
@@ -568,6 +606,30 @@ function normalizeAdminAmount(value: string): string {
 function isValidAdminAmount(value: string): boolean {
 	const normalized = normalizeAdminAmount(value);
 	return /^\d+(?:\.\d{1,2})?$/.test(normalized) && Number(normalized) > 0;
+}
+
+function formatCustomerName(email: string): string {
+	const localPart = email.split("@")[0] || "Kunde";
+	return localPart
+		.split(/[._-]+/)
+		.filter(Boolean)
+		.map((part) => part.charAt(0).toLocaleUpperCase("de-DE") + part.slice(1))
+		.join(" ");
+}
+
+function NavigationGlyph({ name }: { name: NavigationIcon }) {
+	const paths: Record<NavigationIcon, React.ReactNode> = {
+		home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
+		wallet: <><path d="M4 6.5h14a2 2 0 0 1 2 2v10H4a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2h13" /><path d="M16 11h6v5h-6a2.5 2.5 0 0 1 0-5Z" /></>,
+		activity: <><path d="M4 5h16M4 12h16M4 19h16" /><path d="m8 2-3 3 3 3m8 1 3 3-3 3m-8 1-3 3 3 3" /></>,
+		send: <><path d="m22 2-7 20-4-9-9-4 20-7Z" /><path d="M22 2 11 13" /></>,
+		calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
+		repeat: <><path d="m17 2 4 4-4 4" /><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4" /><path d="M21 13v2a3 3 0 0 1-3 3H3" /></>,
+		users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+		settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1 1.55V21h-4v-.08a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.08a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.08a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.08a1.7 1.7 0 0 0-1.52 1Z" /></>,
+		shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></>,
+	};
+	return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-[18px] w-[18px] fill-none stroke-current" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
 function Status({ value }: { value: string }) {

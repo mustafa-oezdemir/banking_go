@@ -100,7 +100,7 @@ export default function AuthPage() {
 					</div>}
 					<form onSubmit={submit} className="mt-6 space-y-5">
 						{mode === "register" && <label className="block"><span className="mb-2 block text-sm font-semibold">Vollständiger Name</span><input name="fullName" required maxLength={140} autoComplete="name" className="bank-input" placeholder="Anna Beispiel" /></label>}
-						<label className="block"><span className="mb-2 block text-sm font-semibold">E-Mail-Adresse</span><input name="email" required type="email" autoComplete="email" className="bank-input" placeholder="name@beispiel.de" /></label>
+						<label className="block"><span className="mb-2 block text-sm font-semibold">E-Mail-Adresse</span><input name="email" required type="text" inputMode="email" autoComplete="email" className="bank-input" placeholder="name@beispiel.de" /></label>
 						{mode !== "forgot" && <label className="block"><span className="mb-2 block text-sm font-semibold">Passwort</span><input name="password" required type="password" minLength={mode === "register" ? 15 : undefined} maxLength={72} autoComplete={mode === "login" ? "current-password" : "new-password"} className="bank-input" /><span className="mt-1 block text-xs text-slate-400">{mode === "register" ? "Mindestens 15 Zeichen." : "Ihre Zugangsdaten."}</span></label>}
 						{message && <div role="alert" className={`rounded-lg border p-3 text-sm ${success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{message}</div>}
 						<button disabled={loading} className="bank-primary w-full">{loading ? "Bitte warten…" : mode === "login" ? "Sicher anmelden" : mode === "register" ? "Demo-Zugang erstellen" : "Reset-Link senden"}</button>

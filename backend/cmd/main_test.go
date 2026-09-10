@@ -5,11 +5,10 @@ import (
 	"testing"
 )
 
-func TestLoadEnvironmentSkipsDotEnvOnRender(t *testing.T) {
-	t.Setenv("RENDER", "true")
-
-	if err := loadEnvironment(); err != nil {
-		t.Fatalf("loadEnvironment() on Render returned an error: %v", err)
+func TestLoadEnvironmentAllowsMissingOptionalFiles(t *testing.T) {
+	missingDir := t.TempDir()
+	if err := loadEnvironmentFiles(missingDir+"/.env", missingDir+"/fallback.env"); err != nil {
+		t.Fatalf("loadEnvironmentFiles() returned an error for missing optional files: %v", err)
 	}
 }
 

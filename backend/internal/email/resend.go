@@ -2,13 +2,10 @@
 package email
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/resend/resend-go/v3"
 	"github.com/rs/zerolog/log"
 	"github.com/shopspring/decimal"
 
@@ -25,7 +23,7 @@ import (
 )
 
 const (
-	defaultResendEndpoint = "https://api.resend.com/emails"
+	defaultResendEndpoint = "https://api.resend.com/"
 	defaultFromAddress    = "Pehlione DemoBank <banking@pehlione.com>"
 	defaultFrontendURL    = "http://localhost:3000"
 	activityQueueSize     = 100
@@ -46,10 +44,10 @@ type Config struct {
 // Service delivers password-reset messages synchronously and account activity
 // through a small non-blocking queue.
 type Service struct {
-	store  *db.Store
-	client *http.Client
-	queue  chan notification.Activity
-	config Config
+	store        *db.Store
+	resendClient *resend.Client
+	queue        chan notification.Activity
+	config       Config
 }
 
 // NewFromEnvironment constructs a Resend client from runtime configuration.
@@ -86,8 +84,12 @@ func NewService(store *db.Store, config Config, client *http.Client) *Service {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
+	resendClient := resend.NewCustomClient(client, config.APIKey)
+	if baseURL, err := url.Parse(resendBaseURL(config.Endpoint)); err == nil {
+		resendClient.BaseURL = baseURL
+	}
 	service := &Service{
-		store: store, client: client, config: config,
+		store: store, resendClient: resendClient, config: config,
 		queue: make(chan notification.Activity, activityQueueSize),
 	}
 	if service.Enabled() {
@@ -188,35 +190,26 @@ func (s *Service) send(ctx context.Context, recipient, subject, htmlBody, textBo
 	if s.config.SMTPHost != "" {
 		return s.sendSMTP(ctx, recipient, subject, htmlBody, textBody)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"from": s.config.From, "to": []string{recipient}, "subject": subject,
-		"html": htmlBody, "text": textBody,
+	response, err := s.resendClient.Emails.SendWithContext(ctx, &resend.SendEmailRequest{
+		From:    s.config.From,
+		To:      []string{recipient},
+		Subject: subject,
+		Html:    htmlBody,
+		Text:    textBody,
 	})
 	if err != nil {
-		return fmt.Errorf("encode Resend request: %w", err)
+		return fmt.Errorf("send email with Resend: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.Endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("create Resend request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send Resend request: %w", err)
-	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
-			log.Warn().Err(closeErr).Msg("Failed to close Resend response")
-		}
-	}()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(response.Body, 2048)); drainErr != nil {
-			return fmt.Errorf("resend returned status %d", response.StatusCode)
-		}
-		return fmt.Errorf("resend returned status %d", response.StatusCode)
+	if response == nil || strings.TrimSpace(response.Id) == "" {
+		return errors.New("resend returned an empty email ID")
 	}
 	return nil
+}
+
+func resendBaseURL(endpoint string) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	baseURL = strings.TrimSuffix(baseURL, "/emails")
+	return baseURL + "/"
 }
 
 func localizedEUR(value string) string {

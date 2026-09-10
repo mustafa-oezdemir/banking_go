@@ -25,12 +25,15 @@ func TestSendPasswordResetUsesResendAPI(t *testing.T) {
 	received := make(chan requestPayload, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/emails", r.URL.Path)
 		assert.Equal(t, "Bearer re_test_secret", r.Header.Get("Authorization"))
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		var payload requestPayload
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
 		received <- payload
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"id":"email_test_123"}`))
+		require.NoError(t, err)
 	}))
 	t.Cleanup(server.Close)
 
@@ -48,6 +51,30 @@ func TestSendPasswordResetUsesResendAPI(t *testing.T) {
 	assert.Contains(t, payload.HTML, "15 Minuten")
 	assert.Contains(t, payload.Text, "15 Minuten")
 	assert.False(t, strings.Contains(payload.HTML, "re_test_secret"))
+}
+
+func TestSendPasswordResetRejectsMissingResendMessageID(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"id":""}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	service := NewService(nil, Config{
+		APIKey: "re_test_secret", From: "Pehlione <banking@pehlione.com>",
+		FrontendURL: "https://bank.example", Endpoint: server.URL,
+	}, server.Client())
+	err := service.SendPasswordReset(context.Background(), "owner@example.com", "Ada Beispiel", "safe_token")
+	require.EqualError(t, err, "resend returned an empty email ID")
+}
+
+func TestResendBaseURLAcceptsLegacyEmailsEndpoint(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "https://api.resend.com/", resendBaseURL("https://api.resend.com/emails"))
+	assert.Equal(t, "https://api.resend.com/", resendBaseURL("https://api.resend.com/"))
 }
 
 func TestDisabledServiceRejectsPasswordResetDelivery(t *testing.T) {

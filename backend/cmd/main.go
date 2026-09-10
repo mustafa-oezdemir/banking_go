@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -193,21 +194,22 @@ func envOrDefault(key, fallback string) string {
 }
 
 func loadEnvironment() error {
-	// Render injects configuration as environment variables. A .env file is a
-	// local-development convenience and is intentionally absent in production.
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("RENDER")), "true") {
-		return nil
-	}
+	return loadEnvironmentFiles(".env", "../.env")
+}
 
-	var lastErr error
-	for _, envPath := range []string{".env", "../.env"} {
+func loadEnvironmentFiles(envPaths ...string) error {
+	for _, envPath := range envPaths {
 		err := godotenv.Load(envPath)
 		if err == nil {
 			return nil
 		}
-		lastErr = err
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
-	return lastErr
+	// A .env file is an optional local-development convenience. Containers and
+	// production environments inject configuration through process variables.
+	return nil
 }
 
 func main() {
@@ -217,7 +219,7 @@ func main() {
 	initLogger()
 
 	if err := loadEnvironment(); err != nil {
-		zlog.Info().Err(err).Msg("No .env file found; using system environment")
+		zlog.Warn().Err(err).Msg("Failed to load .env file; using system environment")
 	}
 	configureSwaggerBaseURL()
 
