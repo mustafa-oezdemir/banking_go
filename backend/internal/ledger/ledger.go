@@ -1,4 +1,4 @@
-// Package service contains the core ledger business logic.
+// Package ledger contains the core double-entry bookkeeping behavior.
 package ledger
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -37,8 +37,8 @@ var (
 	ErrAccountBlocked = errors.New("account is not active")
 )
 
-// LedgerService coordinates double-entry operations on accounts.
-type LedgerService struct {
+// Service coordinates double-entry operations on accounts.
+type Service struct {
 	store *db.Store
 }
 
@@ -48,14 +48,14 @@ type FundedCustomer struct {
 	User    sqlc.CreateUserRow
 }
 
-// NewLedgerService constructs a LedgerService backed by the provided store.
-func NewLedgerService(store *db.Store) *LedgerService {
-	return &LedgerService{store: store}
+// NewService constructs a Service backed by the provided store.
+func NewService(store *db.Store) *Service {
+	return &Service{store: store}
 }
 
 // CreateFundedCustomer atomically creates a customer, their default EUR account,
 // and the balanced signup credit. A failed account or ledger write rolls back the user too.
-func (s *LedgerService) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (FundedCustomer, error) {
+func (s *Service) CreateFundedCustomer(ctx context.Context, input sqlc.CreateUserParams) (FundedCustomer, error) {
 	iban, err := sepa.GenerateGermanDemoIBAN()
 	if err != nil {
 		return FundedCustomer{}, fmt.Errorf("generate signup account IBAN: %w", err)
@@ -85,7 +85,7 @@ func (s *LedgerService) CreateFundedCustomer(ctx context.Context, input sqlc.Cre
 }
 
 // Deposit external money into user account
-func (s *LedgerService) Deposit(ctx context.Context, accountID uuid.UUID, amountStr string) error {
+func (s *Service) Deposit(ctx context.Context, accountID uuid.UUID, amountStr string) error {
 	// Step 1: Validate amount once at service boundary.
 	amount, err := validatePositiveAmount(amountStr)
 	if err != nil {
@@ -97,7 +97,7 @@ func (s *LedgerService) Deposit(ctx context.Context, accountID uuid.UUID, amount
 	})
 }
 
-func (s *LedgerService) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+func (s *Service) depositTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
 	// Step 2: Lock settlement + target account rows for this transaction.
 	settlement, err := q.GetSettlementAccountForUpdate(ctx)
 	if err != nil {
@@ -171,7 +171,7 @@ func (s *LedgerService) depositTx(ctx context.Context, q *sqlc.Queries, accountI
 }
 
 // Withdraw external money from user account
-func (s *LedgerService) Withdraw(ctx context.Context, accountID uuid.UUID, amountStr string) error {
+func (s *Service) Withdraw(ctx context.Context, accountID uuid.UUID, amountStr string) error {
 	// Step 1: Validate amount before opening expensive DB work.
 	amount, err := validatePositiveAmount(amountStr)
 	if err != nil {
@@ -183,7 +183,7 @@ func (s *LedgerService) Withdraw(ctx context.Context, accountID uuid.UUID, amoun
 	})
 }
 
-func (s *LedgerService) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
+func (s *Service) withdrawTx(ctx context.Context, q *sqlc.Queries, accountID uuid.UUID, amount decimal.Decimal) error {
 	// Step 2: Lock settlement + user account to prevent concurrent balance races.
 	settlement, err := q.GetSettlementAccountForUpdate(ctx)
 	if err != nil {
@@ -266,7 +266,7 @@ func (s *LedgerService) withdrawTx(ctx context.Context, q *sqlc.Queries, account
 }
 
 // AdjustBalanceAsAdmin performs the ledger mutation and actor-aware audit insert atomically.
-func (s *LedgerService) AdjustBalanceAsAdmin(
+func (s *Service) AdjustBalanceAsAdmin(
 	ctx context.Context,
 	actorID, accountID uuid.UUID,
 	operation, amountStr, requestID string,
@@ -302,10 +302,10 @@ func (s *LedgerService) AdjustBalanceAsAdmin(
 }
 
 // Transfer moves money only between accounts owned by the same authenticated
-// customer. Transfers to another customer must use PaymentService so VoP,
+// customer. Transfers to another customer must use payment.Service so VoP,
 // explicit confirmation, idempotency, and the payment state machine cannot be
 // bypassed through this legacy endpoint.
-func (s *LedgerService) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID, amountStr string) error {
+func (s *Service) Transfer(ctx context.Context, ownerID, fromID, toID uuid.UUID, amountStr string) error {
 	// Step 1: Validate amount and reject self-transfers immediately.
 	if ownerID == uuid.Nil {
 		return ErrAccountOwnership
@@ -413,7 +413,7 @@ func (s *LedgerService) Transfer(ctx context.Context, ownerID, fromID, toID uuid
 }
 
 // ReconcileAccount verifies stored balance == SUM(credits) - SUM(debits)
-func (s *LedgerService) ReconcileAccount(ctx context.Context, accountID uuid.UUID) (bool, error) {
+func (s *Service) ReconcileAccount(ctx context.Context, accountID uuid.UUID) (bool, error) {
 	// Step 1: Read stored balance snapshot from accounts table.
 	account, err := s.store.GetAccount(ctx, accountID)
 	if err != nil {

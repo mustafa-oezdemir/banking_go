@@ -33,6 +33,12 @@ func isSerializationError(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "40001"
 }
 
+// IsUniqueViolation reports whether err is PostgreSQL SQLSTATE 23505.
+func IsUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+}
+
 // ExecTx runs fn inside a transaction and handles rollback on error.
 // Serialization failures (SQLSTATE 40001) are automatically retried up to maxAttempts times.
 func (store *Store) ExecTx(ctx context.Context, fn func(q *sqlc.Queries) error) error {

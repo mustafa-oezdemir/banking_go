@@ -1,3 +1,4 @@
+// Package identity contains credential normalization and password policy.
 package identity
 
 import (
@@ -48,7 +49,9 @@ func VerifyPassword(hash, password string) bool {
 
 // VerifyDummyPassword performs the same expensive comparison for unknown users.
 func VerifyDummyPassword(password string) {
-	_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+	if bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)) == nil {
+		return
+	}
 }
 
 // NormalizeEmail validates and canonicalizes an identity email address.

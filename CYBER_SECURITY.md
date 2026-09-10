@@ -42,15 +42,15 @@ flowchart LR
 
 | Güvenlik alanı | Durum | Başlıca dosyalar |
 | --- | --- | --- |
-| XSS savunması | 🟡 Kısmi | `frontend/proxy.ts`, React bileşenleri, `backend/internal/email/resend.go` |
-| SQL injection savunması | ✅ Uygulandı | `backend/postgres/queries/*.sql`, `backend/internal/db/*.go`, `backend/sqlc.yaml` |
-| JWT ve oturum | ✅ Demo seviyesi | `backend/internal/api/middleware.go`, `backend/internal/api/security.go` |
-| Parola güvenliği | ✅ Uygulandı | `backend/internal/api/credentials.go`, `password_reset_handler.go` |
-| CSRF ve CORS | ✅ Uygulandı | `backend/internal/api/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts` |
+| XSS savunması | 🟡 Kısmi | `frontend/proxy.ts`, React bileşenleri, `backend/internal/platform/email/resend.go` |
+| SQL injection savunması | ✅ Uygulandı | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go`, `backend/sqlc.yaml` |
+| JWT ve oturum | ✅ Demo seviyesi | `backend/internal/platform/httpapi/middleware.go`, `backend/internal/platform/httpapi/security.go` |
+| Parola güvenliği | ✅ Uygulandı | `backend/internal/identity/credentials.go`, `password_reset_handler.go` |
+| CSRF ve CORS | ✅ Uygulandı | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts` |
 | BOLA/IDOR yetkilendirmesi | ✅ Uygulandı | API handler'ları, owner filtreli SQL sorguları, servis sahiplik kontrolleri |
 | Finansal bütünlük | ✅ Güçlü demo kontrolü | `ledger.go`, `payments.go`, `store.go`, migration `000011` |
-| Rate limiting | 🟡 Tek instance | `backend/internal/api/security.go`, `backend/cmd/main.go` |
-| Audit kayıtları | ✅ Uygulandı | `backend/internal/db/admin.go`, migration `000007` |
+| Rate limiting | 🟡 Tek instance | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go` |
+| Audit kayıtları | ✅ Uygulandı | `backend/internal/platform/database/admin.go`, migration `000007` |
 | Container güvenliği | ✅ Temel hardening | Backend/frontend `Dockerfile`, Compose healthcheck'leri |
 | Secret ve dependency taraması | ✅ CI'da mevcut | `.github/workflows/security.yml`, `codeql.yml`, `ci.yml` |
 | MFA/SCA ve işlem imzalama | ❌ Yok | Gerçek bankacılık için yeni kimlik/işlem onay servisi gerekir. |
@@ -68,9 +68,9 @@ flowchart LR
 | Tehlikeli object/embed engeli | `frontend/proxy.ts` | `object-src 'none'` uygulanır. |
 | Form ve base URI sınırı | `frontend/proxy.ts` | `form-action 'self'` ve `base-uri 'self'` açık yönlendirme/enjeksiyon etkisini sınırlar. |
 | React varsayılan escaping | `frontend/components/**/*.tsx` | Kullanıcı verileri JSX metni olarak render edilir. İncelemede `dangerouslySetInnerHTML`, `innerHTML`, `eval` veya `document.write` sink'i bulunmadı. |
-| E-posta HTML escaping ve yerel yakalama | `backend/internal/email/resend.go`, `backend/internal/email/smtp.go`, `docker-compose.dev.yml` | Ad, hesap, tutar, karşı taraf ve açıklamalar `html.EscapeString` ile encode edilir. Yerel geliştirmede mesajlar MailHog SMTP ile yakalanır ve internete gönderilmez; üretimde Resend HTTPS kullanılır. |
-| MIME sniffing engeli | `frontend/next.config.ts`, `backend/internal/api/security.go` | `X-Content-Type-Options: nosniff` gönderilir. |
-| Referrer kısıtlaması | `frontend/next.config.ts`, `backend/internal/api/security.go` | API `no-referrer`, frontend `strict-origin-when-cross-origin` uygular. |
+| E-posta HTML escaping ve yerel yakalama | `backend/internal/platform/email/resend.go`, `backend/internal/platform/email/smtp.go`, `docker-compose.dev.yml` | Ad, hesap, tutar, karşı taraf ve açıklamalar `html.EscapeString` ile encode edilir. Yerel geliştirmede mesajlar MailHog SMTP ile yakalanır ve internete gönderilmez; üretimde Resend HTTPS kullanılır. |
+| MIME sniffing engeli | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` | `X-Content-Type-Options: nosniff` gönderilir. |
+| Referrer kısıtlaması | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` | API `no-referrer`, frontend `strict-origin-when-cross-origin` uygular. |
 
 ### Bilinen sınırlar
 
@@ -87,10 +87,10 @@ flowchart LR
 | --- | --- | --- |
 | Parametreli SQL | `backend/postgres/queries/*.sql` | SQL sorguları `$1`, `$2` ve `sqlc.arg(...)` parametreleri kullanır; kullanıcı girdisi SQL metnine birleştirilmez. |
 | Tip güvenli query üretimi | `backend/sqlc.yaml`, `backend/postgres/sqlc/*.go` | sqlc, sorgular için tipli Go metotları üretir. |
-| Sabit manuel sorgular | `backend/internal/db/admin.go`, `backend/internal/db/password_reset.go` | Manuel sorgular da placeholder parametreleriyle çalışır. |
-| UUID ve enum doğrulaması | `backend/internal/api/handler.go`, `payments_handler.go`, migration dosyaları | Path/body UUID'leri parse edilir; rol, durum, para birimi ve ödeme state'leri DB CHECK constraint'leriyle sınırlandırılır. |
-| Katı JSON | `backend/internal/api/payments_handler.go` | `DisallowUnknownFields`, `UseNumber` ve tek JSON değeri kontrolü type confusion/mass-assignment riskini azaltır. |
-| Request body limiti | `backend/internal/api/security.go`, `backend/cmd/main.go` | API body boyutu 1 MiB ile sınırlandırılır. |
+| Sabit manuel sorgular | `backend/internal/platform/database/admin.go`, `backend/internal/platform/database/password_reset.go` | Manuel sorgular da placeholder parametreleriyle çalışır. |
+| UUID ve enum doğrulaması | `backend/internal/platform/httpapi/handler.go`, `payments_handler.go`, migration dosyaları | Path/body UUID'leri parse edilir; rol, durum, para birimi ve ödeme state'leri DB CHECK constraint'leriyle sınırlandırılır. |
+| Katı JSON | `backend/internal/platform/httpapi/payments_handler.go` | `DisallowUnknownFields`, `UseNumber` ve tek JSON değeri kontrolü type confusion/mass-assignment riskini azaltır. |
+| Request body limiti | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go` | API body boyutu 1 MiB ile sınırlandırılır. |
 
 ### Bilinen sınırlar
 
@@ -102,12 +102,12 @@ flowchart LR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| HS256 imza ve minimum secret | `backend/internal/api/middleware.go` | `JWT_SECRET` zorunlu ve en az 32 karakterdir; algoritma uygulama tarafından sabitlenir. |
-| Standart claim'ler | `backend/internal/api/middleware.go` | `iss`, `aud`, `jti`, `iat`, `nbf`, `exp` ve `user_id` claim'leri üretilir. Token ömrü 2 saattir. |
-| HttpOnly cookie | `backend/internal/api/middleware.go` | Token JavaScript'e açılmaz; `HttpOnly`, `SameSite=Strict`, production HTTPS'te `Secure` kullanılır. |
-| Server-side iptal | `backend/internal/api/security.go`, `backend/internal/db/admin.go` | JWT içindeki `session_version`, veritabanındaki sürümle karşılaştırılır. Logout, parola veya rol değişimi eski token'ları geçersiz kılar. |
+| HS256 imza ve minimum secret | `backend/internal/platform/httpapi/middleware.go` | `JWT_SECRET` zorunlu ve en az 32 karakterdir; algoritma uygulama tarafından sabitlenir. |
+| Standart claim'ler | `backend/internal/platform/httpapi/middleware.go` | `iss`, `aud`, `jti`, `iat`, `nbf`, `exp` ve `user_id` claim'leri üretilir. Token ömrü 2 saattir. |
+| HttpOnly cookie | `backend/internal/platform/httpapi/middleware.go` | Token JavaScript'e açılmaz; `HttpOnly`, `SameSite=Strict`, production HTTPS'te `Secure` kullanılır. |
+| Server-side iptal | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/database/admin.go` | JWT içindeki `session_version`, veritabanındaki sürümle karşılaştırılır. Logout, parola veya rol değişimi eski token'ları geçersiz kılar. |
 | Client state ayrımı | `frontend/lib/store/authStore.ts` | localStorage yalnız e-posta/UI hydration bilgisi taşır; JWT localStorage'a yazılmaz. Gerçek oturum `/session` ile doğrulanır. |
-| SSE süresi ve iptali | `backend/internal/api/payments_handler.go`, `backend/internal/service/events.go` | SSE token süresinde kapanır, session sürümünü tekrar kontrol eder ve kullanıcı başına bağlantıyı sınırlar. |
+| SSE süresi ve iptali | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE token süresinde kapanır, session sürümünü tekrar kontrol eder ve kullanıcı başına bağlantıyı sınırlar. |
 
 ### Gerçek banka için gereken ek kontroller
 
@@ -122,34 +122,34 @@ flowchart LR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| bcrypt hash | `backend/internal/api/handler.go`, `credentials.go` | Parolalar düz metin tutulmaz; bcrypt ile hashlenir. |
-| Parola politikası | `backend/internal/api/credentials.go` | Minimum 15 karakter, maksimum 72 byte ve yaygın parola engeli uygulanır. |
-| Enumeration azaltma | `backend/internal/api/handler.go`, `password_reset_handler.go` | Bilinmeyen kullanıcı için dummy bcrypt çalıştırılır; reset endpoint'i hesap varlığını açıklamayan ortak cevap döndürür. |
-| Kriptografik reset token | `backend/internal/api/password_reset_handler.go` | 32 random byte token üretilir; veritabanında token'ın hash'i tutulur. |
-| Tek kullanım ve 15 dakika | `backend/internal/db/password_reset.go`, migration `000009` | Token kilitlenerek tüketilir, süresi doğrulanır ve tekrar kullanım engellenir. |
-| Reset sonrası session iptali | `backend/internal/db/password_reset.go` | Parola değişince `session_version` artırılır. |
+| bcrypt hash | `backend/internal/platform/httpapi/handler.go`, `credentials.go` | Parolalar düz metin tutulmaz; bcrypt ile hashlenir. |
+| Parola politikası | `backend/internal/identity/credentials.go` | Minimum 15 karakter, maksimum 72 byte ve yaygın parola engeli uygulanır. |
+| Enumeration azaltma | `backend/internal/platform/httpapi/handler.go`, `password_reset_handler.go` | Bilinmeyen kullanıcı için dummy bcrypt çalıştırılır; reset endpoint'i hesap varlığını açıklamayan ortak cevap döndürür. |
+| Kriptografik reset token | `backend/internal/platform/httpapi/password_reset_handler.go` | 32 random byte token üretilir; veritabanında token'ın hash'i tutulur. |
+| Tek kullanım ve 15 dakika | `backend/internal/platform/database/password_reset.go`, migration `000009` | Token kilitlenerek tüketilir, süresi doğrulanır ve tekrar kullanım engellenir. |
+| Reset sonrası session iptali | `backend/internal/platform/database/password_reset.go` | Parola değişince `session_version` artırılır. |
 
 ## 5. CSRF, CORS ve HTTP güvenlik başlıkları
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| CSRF custom header | `backend/internal/api/security.go`, `frontend/lib/api.ts` | Cookie-auth unsafe isteklerde `X-CSRF-Protection: 1` zorunludur. |
-| Fetch Metadata | `backend/internal/api/security.go` | `Sec-Fetch-Site` ile cross-site/same-site unsafe istekler engellenir. |
+| CSRF custom header | `backend/internal/platform/httpapi/security.go`, `frontend/lib/api.ts` | Cookie-auth unsafe isteklerde `X-CSRF-Protection: 1` zorunludur. |
+| Fetch Metadata | `backend/internal/platform/httpapi/security.go` | `Sec-Fetch-Site` ile cross-site/same-site unsafe istekler engellenir. |
 | Origin allowlist | `backend/cmd/main.go`, `.env.example` | CORS origin'leri açık listeyle belirlenir; wildcard ve credential kombinasyonu kullanılmaz. |
-| HSTS | `backend/internal/api/security.go`, `frontend/next.config.ts` | HTTPS yanıtlarında uzun süreli HSTS uygulanır. |
+| HSTS | `backend/internal/platform/httpapi/security.go`, `frontend/next.config.ts` | HTTPS yanıtlarında uzun süreli HSTS uygulanır. |
 | Permissions Policy | Aynı dosyalar | Kamera, mikrofon, konum ve payment browser API'leri kapatılır. |
-| JSON Content-Type | `backend/internal/api/security.go` | Body içeren unsafe istekler için `application/json` zorunludur. |
+| JSON Content-Type | `backend/internal/platform/httpapi/security.go` | Body içeren unsafe istekler için `application/json` zorunludur. |
 
 ## 6. Yetkilendirme, BOLA ve IDOR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| Hesap sahipliği | `backend/internal/api/handler.go`, `backend/internal/service/ledger.go` | Kaynak ve hedef hesap sahipliği backend'de doğrulanır. Legacy `/transfers` yalnız aynı müşterinin hesapları arasında çalışır. |
-| Ödeme sahipliği | `backend/internal/service/payments.go`, `backend/postgres/queries/payments.sql` | Payment get/list/confirm/cancel işlemleri `owner_id` ile sınırlandırılır. |
+| Hesap sahipliği | `backend/internal/platform/httpapi/handler.go`, `backend/internal/ledger/ledger.go` | Kaynak ve hedef hesap sahipliği backend'de doğrulanır. Legacy `/transfers` yalnız aynı müşterinin hesapları arasında çalışır. |
+| Ödeme sahipliği | `backend/internal/payment/payments.go`, `backend/postgres/queries/payments.sql` | Payment get/list/confirm/cancel işlemleri `owner_id` ile sınırlandırılır. |
 | Beneficiary sahipliği | `backend/postgres/queries/payments.sql` | Listeleme, getirme ve silme owner-scoped sorgular kullanır. |
 | Standing order sahipliği | `backend/postgres/queries/standing_orders.sql` | Update/cancel/list sorguları `owner_id` ile filtrelenir. |
-| İşlem geçmişi | `backend/internal/api/handler.go`, `payments_handler.go` | Hesaba erişmeden önce authenticated user ile owner kontrolü yapılır. |
-| Admin rolü | `backend/internal/api/admin_handler.go` | Token claim'ine kör güvenmek yerine kullanıcının güncel rolü veritabanından okunur. Self-demotion engellenir. |
+| İşlem geçmişi | `backend/internal/platform/httpapi/handler.go`, `payments_handler.go` | Hesaba erişmeden önce authenticated user ile owner kontrolü yapılır. |
+| Admin rolü | `backend/internal/platform/httpapi/admin_handler.go` | Token claim'ine kör güvenmek yerine kullanıcının güncel rolü veritabanından okunur. Self-demotion engellenir. |
 | Sistem hesabı koruması | `ledger.go`, `payments.go` | Customer akışlarının settlement/system hesaplarını doğrudan kullanması engellenir. |
 
 Frontend route guard güvenlik sınırı değildir. `frontend/proxy.ts` kullanıcı deneyimi için cookie varlığını kontrol eder; gerçek yetkilendirme daima Go API ve PostgreSQL sorgularında yapılır.
@@ -158,9 +158,9 @@ Frontend route guard güvenlik sınırı değildir. `frontend/proxy.ts` kullanı
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| Exact decimal | `backend/internal/service/money.go` | Float yerine `decimal` kullanılır; EUR tutarı pozitif, en fazla iki ondalık ve üst sınır içinde olmalıdır. |
-| Atomic double-entry | `backend/internal/service/ledger.go`, `payments.go` | Debit, credit ve cached balance güncellemesi tek transaction içinde yapılır. Hata halinde rollback olur. |
-| Serializable isolation | `backend/internal/db/store.go` | Finansal transaction'lar `sql.LevelSerializable` kullanır; serialization conflict kontrollü backoff ile tekrar denenir. |
+| Exact decimal | `backend/internal/ledger/money.go` | Float yerine `decimal` kullanılır; EUR tutarı pozitif, en fazla iki ondalık ve üst sınır içinde olmalıdır. |
+| Atomic double-entry | `backend/internal/ledger/ledger.go`, `payments.go` | Debit, credit ve cached balance güncellemesi tek transaction içinde yapılır. Hata halinde rollback olur. |
+| Serializable isolation | `backend/internal/platform/database/store.go` | Finansal transaction'lar `sql.LevelSerializable` kullanır; serialization conflict kontrollü backoff ile tekrar denenir. |
 | Stabil row locking | `ledger.go`, `payments.go`, `accounts.sql` | Hesaplar UUID sırasıyla `FOR UPDATE` kilitlenir; eşzamanlı double-spend/deadlock riski azaltılır. |
 | İdempotency | `payments_handler.go`, `payments.go`, migration `000005` | `Idempotency-Key` zorunludur; owner+key unique constraint ve aynı intent karşılaştırması vardır. |
 | Ödeme state machine | `payments.sql`, `payments.go` | Yalnız izin verilen durum geçişleri SQL WHERE koşullarıyla uygulanır. |
@@ -173,12 +173,12 @@ Frontend route guard güvenlik sınırı değildir. `frontend/proxy.ts` kullanı
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| Admin audit | `backend/internal/db/admin.go`, migration `000007` | Aktör, hedef, önce/sonra değerleri, action ve request ID aynı DB transaction'ında yazılır. |
+| Admin audit | `backend/internal/platform/database/admin.go`, migration `000007` | Aktör, hedef, önce/sonra değerleri, action ve request ID aynı DB transaction'ında yazılır. |
 | Append-only admin audit | migration `000007_security_hardening.up.sql` | Admin audit UPDATE/DELETE trigger ile engellenir. |
 | Request correlation | `backend/cmd/main.go` | Chi RequestID loglara eklenir. |
 | Hassas log azaltma | Handler ve service dosyaları | Parola/JWT/tam IBAN loglanmaz; finansal ayrıntılar yerine genel olay mesajları kullanılır. |
-| IBAN maskeleme | `backend/internal/sepa/iban.go`, API mapper/DTO dosyaları | Liste yanıtlarında masked IBAN döndürülür; tam IBAN yalnız owner-authorized detay akışında açılır. |
-| Profil PII izolasyonu | `backend/internal/api/profile_handler.go`, `backend/internal/db/profile.go` | Profil yalnız authenticated user ID ile okunur/güncellenir; audit kaydı kişisel alan değerlerini kopyalamaz. |
+| IBAN maskeleme | `backend/internal/account/iban.go`, API mapper/DTO dosyaları | Liste yanıtlarında masked IBAN döndürülür; tam IBAN yalnız owner-authorized detay akışında açılır. |
+| Profil PII izolasyonu | `backend/internal/platform/httpapi/profile_handler.go`, `backend/internal/platform/database/profile.go` | Profil yalnız authenticated user ID ile okunur/güncellenir; audit kaydı kişisel alan değerlerini kopyalamaz. |
 
 Gerçek üretimde audit kayıtları ayrı güven sınırına, merkezi SIEM'e ve değiştirilemez/WORM retention katmanına gönderilmelidir. Log erişimi RBAC, alarm ve veri saklama politikasıyla yönetilmelidir.
 
@@ -193,7 +193,7 @@ Mevcut limitler `backend/cmd/main.go` içinde tanımlıdır:
 - VoP: dakikada 30 istek/IP.
 - Payment create/confirm: dakikada 20 istek/IP.
 
-`backend/internal/api/security.go` proxy header'larını yalnız açıkça güvenilen proxy modunda kabul eder.
+`backend/internal/platform/httpapi/security.go` proxy header'larını yalnız açıkça güvenilen proxy modunda kabul eder.
 
 🟡 Mevcut limiter process memory'sindedir. Çok instance'lı production ortamında Redis/API gateway tabanlı dağıtık limit, kullanıcı+cihaz+IP bileşik anahtarı, WAF, bot yönetimi ve anomali tespiti gerekir.
 
@@ -237,18 +237,18 @@ Gerçek banka için ayrıca SBOM üretimi, artifact provenance/attestation, imza
 
 | Test alanı | Dosya |
 | --- | --- |
-| Güvenlik header, CSRF, rate limit, strict JSON, session revoke | `backend/internal/api/security_test.go` |
-| JWT yapılandırması | `backend/internal/api/middleware_test.go` |
-| Parola politikası | `backend/internal/api/credentials_test.go` |
-| BOLA/hesap CRUD | `backend/internal/api/handler_test.go` |
-| Atomic ledger, blocked/system account ve same-owner transfer | `backend/internal/service/ledger_test.go` |
-| Tutar sınırları | `backend/internal/service/money_test.go` |
-| Payment idempotency/state/race | `backend/internal/service/payments_test.go` |
+| Güvenlik header, CSRF, rate limit, strict JSON, session revoke | `backend/internal/platform/httpapi/security_test.go` |
+| JWT yapılandırması | `backend/internal/platform/httpapi/middleware_test.go` |
+| Parola politikası | `backend/internal/identity/credentials_test.go` |
+| BOLA/hesap CRUD | `backend/internal/platform/httpapi/handler_test.go` |
+| Atomic ledger, blocked/system account ve same-owner transfer | `backend/internal/ledger/ledger_test.go` |
+| Tutar sınırları | `backend/internal/ledger/money_test.go` |
+| Payment idempotency/state/race | `backend/internal/payment/payments_test.go` |
 | Worker/standing order | service testleri ve SQL claim sorguları |
-| IBAN MOD-97 | `backend/internal/sepa/iban_test.go` |
-| Password reset tek kullanım | `backend/internal/db/password_reset_test.go` |
-| Ledger UPDATE/DELETE yasağı | `backend/internal/db/ledger_immutability_test.go` |
-| Profil persistence ve PII içermeyen audit | `backend/internal/db/profile_test.go`, `backend/internal/api/profile_handler_test.go` |
+| IBAN MOD-97 | `backend/internal/account/iban_test.go` |
+| Password reset tek kullanım | `backend/internal/platform/database/password_reset_test.go` |
+| Ledger UPDATE/DELETE yasağı | `backend/internal/platform/database/ledger_immutability_test.go` |
+| Profil persistence ve PII içermeyen audit | `backend/internal/platform/database/profile_test.go`, `backend/internal/platform/httpapi/profile_handler_test.go` |
 
 Temel doğrulama komutları:
 
@@ -295,11 +295,11 @@ yarn build
 
 | İhtiyaç | İlk bakılacak dosyalar |
 | --- | --- |
-| JWT/token değişikliği | `backend/internal/api/middleware.go`, `security.go`, `admin.go` |
+| JWT/token değişikliği | `backend/internal/platform/httpapi/middleware.go`, `security.go`, `admin.go` |
 | Login/parola/MFA | `credentials.go`, `handler.go`, `password_reset_handler.go` |
-| XSS/CSP/header | `frontend/proxy.ts`, `frontend/next.config.ts`, `backend/internal/api/security.go` |
-| SQL ve owner filtresi | `backend/postgres/queries/*.sql`, `backend/internal/db/*.go` |
-| Para transferi | `backend/internal/service/ledger.go`, `payments.go`, `money.go` |
+| XSS/CSP/header | `frontend/proxy.ts`, `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` |
+| SQL ve owner filtresi | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go` |
+| Para transferi | `backend/internal/ledger/ledger.go`, `payments.go`, `money.go` |
 | Ödeme state/idempotency | `payments.go`, `payments.sql`, migration `000005` |
 | Scheduler/worker | `payment_worker.go`, `standing_orders.go`, ilgili SQL sorguları |
 | Admin ve audit | `admin_handler.go`, `db/admin.go`, migration `000007` |

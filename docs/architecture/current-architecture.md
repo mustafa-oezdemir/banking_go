@@ -1,10 +1,10 @@
 # Current Architecture
 
-Status: Phase 0 baseline
+Status: Phase 1 domain-module architecture
 
 Last verified: 2026-09-10
 
-Scope: repository commit `4a17507`
+Scope: Phase 1 completion state
 
 ## Purpose and system boundary
 
@@ -57,45 +57,63 @@ Docker Compose starts `db`, `mailhog`, `app`, and `frontend`. The normal `app` p
 flowchart TB
     Main["cmd/main\ncomposition root and routes"]
     Worker["cmd/worker\nscheduled-payment loop"]
-    API["internal/api\nHTTP, auth, validation, DTOs"]
-    Service["internal/service\nledger, payment, VoP, seeds, scheduler"]
-    DBStore["internal/db\ntransaction helper and manual SQL"]
-    Email["internal/email\nSMTP and Resend adapters"]
+    HTTP["internal/platform/httpapi\nHTTP, auth, validation, DTOs"]
+    Identity["internal/identity\ncredential policy"]
+    Account["internal/account\nIBAN and profile rules"]
+    Ledger["internal/ledger\nmoney and double-entry rules"]
+    Payment["internal/payment\npayment lifecycle and scheduler"]
     Notify["internal/notification\nmessage and Sender port"]
-    SEPA["internal/sepa\nIBAN rules"]
+    Bootstrap["internal/platform/bootstrap\nseed adapter"]
+    Email["internal/platform/email\nSMTP and Resend adapters"]
+    DBStore["internal/platform/database\ntransaction helper and manual SQL"]
     SQLC["postgres/sqlc\ngenerated persistence API"]
     PG[("PostgreSQL")]
 
-    Main --> API
-    Main --> Service
+    Main --> HTTP
+    Main --> Identity
+    Main --> Account
+    Main --> Ledger
+    Main --> Payment
+    Main --> Bootstrap
     Main --> DBStore
     Main --> Email
-    Worker --> Service
+    Worker --> Payment
     Worker --> DBStore
-    API --> Service
-    API --> DBStore
-    API --> Notify
-    API --> SEPA
-    API --> SQLC
-    Service --> DBStore
-    Service --> Notify
-    Service --> SEPA
-    Service --> SQLC
+    HTTP --> Identity
+    HTTP --> Account
+    HTTP --> Ledger
+    HTTP --> Payment
+    HTTP --> Notify
+    HTTP --> DBStore
+    HTTP --> SQLC
+    Ledger --> Account
+    Ledger --> DBStore
+    Ledger --> SQLC
+    Payment --> Account
+    Payment --> Ledger
+    Payment --> Notify
+    Payment --> DBStore
+    Payment --> SQLC
+    Bootstrap --> Identity
+    Bootstrap --> Account
+    Bootstrap --> Ledger
+    Bootstrap --> Payment
+    Bootstrap --> DBStore
     Email --> DBStore
     Email --> Notify
-    Email --> SEPA
+    Email --> Account
     DBStore --> SQLC
     SQLC --> PG
 ```
 
-The arrows show compile-time dependencies. The current package names are mostly technical layers rather than business-capability boundaries.
+The arrows show compile-time dependencies. Domain ownership is now explicit and guarded by an architecture test. The direct Ledger/Payment dependency on the database adapter and sqlc is a documented Phase 1 transition; Phase 2 removes that persistence coupling without changing deployment topology.
 
 ## Executables and entry points
 
 | Executable | Source | Responsibility |
 | --- | --- | --- |
 | HTTP API | `backend/cmd/main.go` | Loads environment, connects to PostgreSQL, constructs services, seeds optional demo/admin data, registers Chi routes, starts the in-process scheduler, and serves HTTP. |
-| Payment worker | `backend/cmd/worker/main.go` | Connects to the same PostgreSQL schema and calls `PaymentService.RunDuePayments` every 15 seconds. |
+| Payment worker | `backend/cmd/worker/main.go` | Connects to the same PostgreSQL schema and calls `payment.Service.RunDuePayments` every 15 seconds. |
 | Linux development binary | `backend/Magefile.go` | Builds `backend/bin/linux/ledger` for `docker-compose.dev.yml`. |
 
 The backend image additionally embeds `golang-migrate`, migrations, the API binary, and the worker binary. Its entrypoint can run migrations before the application starts.
@@ -104,13 +122,13 @@ The backend image additionally embeds `golang-migrate`, migrations, the API bina
 
 | Capability | Main routes | Current implementation |
 | --- | --- | --- |
-| Identity/session | `/register`, `/login`, `/logout`, `/session`, `/forgot-password`, `/reset-password` | `internal/api`, `internal/db`, bcrypt, JWT middleware |
-| Customer profile | `GET/PATCH /profile` | HTTP validation plus direct `db.Store` calls |
+| Identity/session | `/register`, `/login`, `/logout`, `/session`, `/forgot-password`, `/reset-password` | `internal/identity`, `internal/platform/httpapi`, `internal/platform/database` |
+| Customer profile | `GET/PATCH /profile` | `account` normalization rules plus HTTP/database adapters |
 | Accounts | `/accounts`, `/accounts/{id}` | Handler-owned orchestration plus sqlc/store access |
 | Ledger views | `/accounts/{id}/entries`, `/transactions/{id}`, `/accounts/{id}/reconcile` | Handler + ledger service + store |
-| Own-account transfer | `POST /transfers` | `LedgerService.Transfer` |
-| Payments and VoP | `/payees/verify`, `/payments*` | `PaymentService` |
-| Recurring payments | `/standing-orders*` | `PaymentService` and scheduler |
+| Own-account transfer | `POST /transfers` | `ledger.Service.Transfer` |
+| Payments and VoP | `/payees/verify`, `/payments*` | `payment.Service` |
+| Recurring payments | `/standing-orders*` | `payment.Service` and scheduler |
 | Beneficiaries | `/beneficiaries*` | Mostly direct handler/store access |
 | Live refresh | `GET /events` | In-memory `EventHub` plus durable audit polling |
 | Administration | `/admin/*` | Handler, store, and ledger service |
@@ -187,11 +205,11 @@ Email delivery is post-commit by design and never participates in a financial tr
 - Ownership checks exist in handlers, queries, or services depending on the flow.
 - Administrator authorization re-reads the role from PostgreSQL rather than trusting a role claim.
 
-Identity policy is currently coupled to HTTP middleware and concrete PostgreSQL access rather than exposed through an identity application interface.
+Credential normalization, password policy, hashing, and verification now live in `internal/identity` without HTTP or PostgreSQL dependencies. Login, JWT/session orchestration, role lookup, and reset-token persistence remain coupled to the HTTP and database adapters and are Phase 2 work.
 
 ## Notifications and live updates
 
-`internal/notification` is the clearest existing port: `Sender` abstracts password-reset and activity delivery. `internal/email` implements it through SMTP or Resend.
+`internal/notification` is the provider-neutral port: `Sender` abstracts password-reset and activity delivery. `internal/platform/email` implements it through SMTP or Resend.
 
 Activity messages use a bounded in-memory channel. The enqueue is non-blocking and drops a message when full. The queue is lost on restart, has no retry persistence, and the adapter queries private `users` and `accounts` data to assemble mail. Password-reset delivery is synchronous after token persistence.
 
@@ -220,9 +238,9 @@ GitHub Actions provides:
 
 | Risk | Evidence | Consequence |
 | --- | --- | --- |
-| Domain logic depends on infrastructure | `internal/service` accepts `*db.Store`, uses sqlc types, `database/sql`, and PostgreSQL errors | Business rules are difficult to test or extract without PostgreSQL. |
-| HTTP layer contains application/domain behavior | Account creation, beneficiary validation, profile validation, bcrypt, and authorization orchestration live in handlers | Transport changes can affect business behavior; boundaries are unclear. |
-| Concrete store is shared everywhere | API, ledger, payments, identity, admin, seed, and email use `*db.Store` | Any future service could accidentally access another capability's data. |
+| Ledger/payment application code still depends on persistence | `internal/ledger` and `internal/payment` accept `*db.Store` and expose sqlc records | Important orchestration still needs PostgreSQL; Phase 2 introduces narrow ports and mappings. |
+| HTTP layer still contains application orchestration | Account creation, beneficiary operations, and authorization orchestration remain in `platform/httpapi` | Phase 2 must move useful use cases behind module APIs without mechanical abstraction. |
+| Concrete store is shared by adapters and banking services | HTTP, ledger, payment, bootstrap, and email use `*db.Store` | The architecture test prevents arbitrary imports, but data ownership still depends on code discipline. |
 | Notification adapter reads banking tables | Email loads users and accounts directly | It cannot become an independent service without changing its contract and data ownership. |
 | Non-durable post-commit queue | Activity notifications use an in-memory channel | Restart, saturation, or multiple instances can lose notifications. |
 | Instance-local SSE | `EventHub` is process memory | Clients connected to another replica may miss immediate wake-up signals. |
@@ -234,4 +252,4 @@ GitHub Actions provides:
 
 ## Baseline conclusion
 
-The existing application already has strong local consistency mechanisms and several useful domain concepts. The next safe move is not service extraction. It is a domain-oriented modular monolith that places application interfaces around Identity, Customer/Account, Payment, Ledger, and Notification while keeping Account, Payment, and Ledger in one process and one serializable transaction boundary.
+Phase 1 establishes a domain-oriented modular monolith while retaining the strong local consistency mechanisms. The next safe move is Phase 2: replace concrete persistence and transport coupling with useful application ports and unit-testable rules, while keeping Account, Payment, and Ledger in one process and one serializable transaction boundary.

@@ -21,7 +21,7 @@ import (
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -44,7 +44,7 @@ func setupTestHandler(t *testing.T) *Handler {
 	}
 	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 	store := db.NewStore(sqlDB)
-	ledgerService := ledger.NewLedgerService(store)
+	ledgerService := ledger.NewService(store)
 	return NewHandler(ledgerService, store)
 }
 

@@ -6,15 +6,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 )
 
 func TestSeedDemoDataCanRunRepeatedly(t *testing.T) {
 	t.Setenv("DEMO_SEED_PASSWORD", "integration-only-secret")
 	ledger := setupTestLedger(t)
-	payments := NewPaymentService(ledger.store, nil)
+	payments := payment.NewService(ledger.store, nil)
 
-	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger, payments))
-	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger, payments))
+	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger.Service, payments))
+	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger.Service, payments))
 }
 
 func TestSeedConfiguredAdminIsIndependentFromDemoSeed(t *testing.T) {
@@ -24,7 +26,7 @@ func TestSeedConfiguredAdminIsIndependentFromDemoSeed(t *testing.T) {
 	t.Setenv("ADMIN_SEED_PASSWORD", "integration-admin-secret")
 	t.Setenv("DEMO_SEED", "false")
 
-	require.NoError(t, SeedConfiguredAdmin(context.Background(), ledger.store, ledger))
+	require.NoError(t, SeedConfiguredAdmin(context.Background(), ledger.store, ledger.Service))
 	admin, err := ledger.store.GetUserByEmail(context.Background(), email)
 	require.NoError(t, err)
 	role, err := ledger.store.GetUserRole(context.Background(), admin.ID)
@@ -32,7 +34,7 @@ func TestSeedConfiguredAdminIsIndependentFromDemoSeed(t *testing.T) {
 	require.Equal(t, "ADMIN", role)
 	versionBeforeRestart, err := ledger.store.GetUserSessionVersion(context.Background(), admin.ID)
 	require.NoError(t, err)
-	require.NoError(t, SeedConfiguredAdmin(context.Background(), ledger.store, ledger))
+	require.NoError(t, SeedConfiguredAdmin(context.Background(), ledger.store, ledger.Service))
 	versionAfterRestart, err := ledger.store.GetUserSessionVersion(context.Background(), admin.ID)
 	require.NoError(t, err)
 	require.Equal(t, versionBeforeRestart, versionAfterRestart)

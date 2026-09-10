@@ -34,7 +34,7 @@ func TestScheduledExternalPaymentIsIdempotentAndBalanced(t *testing.T) {
 	require.NoError(t, ledger.Deposit(ctx, source.ID, "50.00"))
 
 	destinationIBAN := mustDemoIBAN(t)
-	service := NewPaymentService(ledger.store, nil)
+	service := NewService(ledger.store, nil)
 	input := CreatePaymentInput{
 		OwnerID: owner.ID, SourceAccountID: source.ID, BeneficiaryName: "External Demo",
 		BeneficiaryIBAN: destinationIBAN, Amount: "12.34", TransferType: PaymentStandard,

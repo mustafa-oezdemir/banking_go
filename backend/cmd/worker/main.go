@@ -19,7 +19,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
 
 func main() {
@@ -50,7 +50,7 @@ func main() {
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	paymentService := payment.NewPaymentService(db.NewStore(connection), nil)
+	paymentService := payment.NewService(db.NewStore(connection), nil)
 	run := func() {
 		processed, runErr := paymentService.RunDuePayments(ctx, 50)
 		if runErr != nil {

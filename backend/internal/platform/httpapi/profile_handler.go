@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
 
 type profileResponse struct {

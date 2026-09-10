@@ -19,14 +19,14 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger   *ledger.LedgerService
-	payments *payment.PaymentService
+	ledger   *ledger.Service
+	payments *payment.Service
 	store    *db.Store
 	notifier notification.Sender
 }
@@ -60,16 +60,16 @@ func parseQueryInt32(raw string) (int32, error) {
 }
 
 // NewHandler constructs a Handler with the required service and persistence dependencies.
-func NewHandler(ledgerService *ledger.LedgerService, store *db.Store) *Handler {
+func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 	return &Handler{
-		ledger: ledgerService, payments: payment.NewPaymentService(store, nil), store: store,
+		ledger: ledgerService, payments: payment.NewService(store, nil), store: store,
 		notifier: notification.NoopSender{},
 	}
 }
 
 // NewHandlerWithPayments allows main and the standalone worker to share the
 // same payment service and in-memory SSE hub.
-func NewHandlerWithPayments(ledgerService *ledger.LedgerService, paymentService *payment.PaymentService, store *db.Store) *Handler {
+func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payment.Service, store *db.Store) *Handler {
 	return &Handler{ledger: ledgerService, payments: paymentService, store: store, notifier: notification.NoopSender{}}
 }
 

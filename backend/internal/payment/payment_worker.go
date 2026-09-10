@@ -13,7 +13,7 @@ import (
 
 // RunDuePayments recovers stale claims, materializes due standing-order
 // occurrences, claims scheduled payments with SKIP LOCKED, and books each once.
-func (s *PaymentService) RunDuePayments(ctx context.Context, batchSize int32) (int, error) {
+func (s *Service) RunDuePayments(ctx context.Context, batchSize int32) (int, error) {
 	if batchSize <= 0 || batchSize > 100 {
 		batchSize = 25
 	}
@@ -45,7 +45,7 @@ func (s *PaymentService) RunDuePayments(ctx context.Context, batchSize int32) (i
 	return processed, nil
 }
 
-func (s *PaymentService) processClaimedPayment(ctx context.Context, paymentID uuid.UUID) error {
+func (s *Service) processClaimedPayment(ctx context.Context, paymentID uuid.UUID) error {
 	var ownerID uuid.UUID
 	var businessErr error
 	var bookedOrder sqlc.PaymentOrder
@@ -81,7 +81,7 @@ func (s *PaymentService) processClaimedPayment(ctx context.Context, paymentID uu
 	return businessErr
 }
 
-func (s *PaymentService) materializeStandingOrders(ctx context.Context, batchSize int32) error {
+func (s *Service) materializeStandingOrders(ctx context.Context, batchSize int32) error {
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		orders, err := q.ClaimDueStandingOrders(ctx, batchSize)
 		if err != nil {

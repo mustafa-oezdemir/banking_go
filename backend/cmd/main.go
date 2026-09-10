@@ -27,7 +27,7 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/bootstrap"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	emailservice "github.com/mustafa-oezdemir/banking_go/internal/platform/email"
 	api "github.com/mustafa-oezdemir/banking_go/internal/platform/httpapi"
 )
@@ -253,9 +253,9 @@ func main() {
 	}()
 
 	store := db.NewStore(dbConn)
-	ledgerSvc := ledger.NewLedgerService(store)
+	ledgerSvc := ledger.NewService(store)
 	eventHub := payment.NewEventHub()
-	paymentSvc := payment.NewPaymentService(store, eventHub)
+	paymentSvc := payment.NewService(store, eventHub)
 	seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if seedErr := bootstrap.SeedConfiguredAdmin(seedCtx, store, ledgerSvc); seedErr != nil {
 		seedCancel()

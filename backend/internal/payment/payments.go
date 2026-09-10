@@ -11,13 +11,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -61,39 +60,43 @@ var (
 	ErrInvalidPaymentInput = errors.New("invalid payment input")
 	// ErrStandingOrderInvalid indicates malformed recurring-payment data.
 	ErrStandingOrderInvalid = errors.New("invalid standing order")
-	// Ledger errors remain stable at the payment application boundary.
-	ErrInvalidAmount       = ledger.ErrInvalidAmount
-	ErrCurrencyMismatch    = ledger.ErrCurrencyMismatch
-	ErrInsufficientFunds   = ledger.ErrInsufficientFunds
-	ErrAccountNotFound     = ledger.ErrAccountNotFound
+	// ErrInvalidAmount preserves the ledger amount error at the payment boundary.
+	ErrInvalidAmount = ledger.ErrInvalidAmount
+	// ErrCurrencyMismatch preserves the ledger currency error at the payment boundary.
+	ErrCurrencyMismatch = ledger.ErrCurrencyMismatch
+	// ErrInsufficientFunds preserves the ledger balance error at the payment boundary.
+	ErrInsufficientFunds = ledger.ErrInsufficientFunds
+	// ErrAccountNotFound preserves the ledger account error at the payment boundary.
+	ErrAccountNotFound = ledger.ErrAccountNotFound
+	// ErrSameAccountTransfer preserves the ledger same-account error at the payment boundary.
 	ErrSameAccountTransfer = ledger.ErrSameAccountTransfer
 )
 
-// PaymentService owns payment state transitions and double-entry booking.
-type PaymentService struct {
+// Service owns payment state transitions and double-entry booking.
+type Service struct {
 	store    *db.Store
 	hub      *EventHub
 	now      func() time.Time
 	notifier notification.Sender
 }
 
-// NewPaymentService creates a payment orchestration service for a store.
-func NewPaymentService(store *db.Store, hub *EventHub) *PaymentService {
+// NewService creates a payment orchestration service for a store.
+func NewService(store *db.Store, hub *EventHub) *Service {
 	if hub == nil {
 		hub = NewEventHub()
 	}
-	return &PaymentService{store: store, hub: hub, now: time.Now, notifier: notification.NoopSender{}}
+	return &Service{store: store, hub: hub, now: time.Now, notifier: notification.NoopSender{}}
 }
 
 // SetNotificationSender enables post-commit account activity emails.
-func (s *PaymentService) SetNotificationSender(sender notification.Sender) {
+func (s *Service) SetNotificationSender(sender notification.Sender) {
 	if sender != nil {
 		s.notifier = sender
 	}
 }
 
 // EventHub returns the service's lightweight SSE notification hub.
-func (s *PaymentService) EventHub() *EventHub { return s.hub }
+func (s *Service) EventHub() *EventHub { return s.hub }
 
 // CreatePaymentInput describes one normalized payment intent.
 //
@@ -122,7 +125,7 @@ type CreatePaymentResult struct {
 
 // CreatePayment creates one awaiting-confirmation order. The idempotency key is
 // scoped to the authenticated owner and never books funds by itself.
-func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentInput) (CreatePaymentResult, error) {
+func (s *Service) CreatePayment(ctx context.Context, input CreatePaymentInput) (CreatePaymentResult, error) {
 	input.BeneficiaryName = strings.TrimSpace(input.BeneficiaryName)
 	input.BeneficiaryIBAN = sepa.NormalizeIBAN(input.BeneficiaryIBAN)
 	input.BeneficiaryBIC = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(input.BeneficiaryBIC), " ", ""))
@@ -216,8 +219,7 @@ func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentI
 	}
 	order, err := s.store.CreatePaymentOrder(ctx, params)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		if db.IsUniqueViolation(err) {
 			existing, lookupErr := s.store.GetPaymentOrderByIdempotency(ctx, sqlc.GetPaymentOrderByIdempotencyParams{
 				OwnerID: input.OwnerID, IdempotencyKey: input.IdempotencyKey,
 			})
@@ -239,7 +241,7 @@ func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentI
 
 // ConfirmPayment records the user's VoP decision and either schedules or books
 // the order. Any booking failure leaves no partial ledger entry.
-func (s *PaymentService) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UUID, acceptMismatch bool) (sqlc.PaymentOrder, error) {
+func (s *Service) ConfirmPayment(ctx context.Context, ownerID, paymentID uuid.UUID, acceptMismatch bool) (sqlc.PaymentOrder, error) {
 	var result sqlc.PaymentOrder
 	var businessErr error
 	err := s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
@@ -306,7 +308,7 @@ func (s *PaymentService) ConfirmPayment(ctx context.Context, ownerID, paymentID 
 }
 
 // CancelPayment cancels an owner-authorized draft or scheduled order.
-func (s *PaymentService) CancelPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
+func (s *Service) CancelPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
 	order, err := s.store.CancelPaymentOrder(ctx, sqlc.CancelPaymentOrderParams{PaymentOrderID: paymentID, OwnerID: ownerID})
 	if err == sql.ErrNoRows {
 		return sqlc.PaymentOrder{}, ErrInvalidPaymentState
@@ -322,7 +324,7 @@ func (s *PaymentService) CancelPayment(ctx context.Context, ownerID, paymentID u
 }
 
 // GetPayment returns one owner-authorized payment order.
-func (s *PaymentService) GetPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
+func (s *Service) GetPayment(ctx context.Context, ownerID, paymentID uuid.UUID) (sqlc.PaymentOrder, error) {
 	order, err := s.store.GetPaymentOrder(ctx, paymentID)
 	if err == sql.ErrNoRows || order.OwnerID != ownerID {
 		return sqlc.PaymentOrder{}, ErrPaymentNotFound
@@ -331,13 +333,13 @@ func (s *PaymentService) GetPayment(ctx context.Context, ownerID, paymentID uuid
 }
 
 // ListPayments returns a page of payment orders for an owner.
-func (s *PaymentService) ListPayments(ctx context.Context, ownerID uuid.UUID, limit, offset int32) ([]sqlc.PaymentOrder, error) {
+func (s *Service) ListPayments(ctx context.Context, ownerID uuid.UUID, limit, offset int32) ([]sqlc.PaymentOrder, error) {
 	return s.store.ListPaymentOrdersByOwner(ctx, sqlc.ListPaymentOrdersByOwnerParams{
 		OwnerID: ownerID, ResultLimit: limit, ResultOffset: offset,
 	})
 }
 
-func (s *PaymentService) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc.PaymentOrder) (sqlc.PaymentOrder, error) {
+func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc.PaymentOrder) (sqlc.PaymentOrder, error) {
 	amount, err := decimal.NewFromString(order.Amount)
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
 		return sqlc.PaymentOrder{}, ErrInvalidAmount
@@ -431,7 +433,7 @@ func (s *PaymentService) bookPaymentTx(ctx context.Context, q *sqlc.Queries, ord
 	})
 }
 
-func (s *PaymentService) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrder) {
+func (s *Service) notifyBookedPayment(ctx context.Context, order sqlc.PaymentOrder) {
 	s.notifier.NotifyActivity(notification.Activity{
 		UserID: order.OwnerID, AccountID: order.SourceAccountID, Kind: "SEPA_PAYMENT_SENT",
 		Direction: "DEBIT", Amount: order.Amount, Currency: "EUR",
@@ -578,13 +580,13 @@ func optionalString(value *string) sql.NullString {
 	return nullString(*value)
 }
 
-func (s *PaymentService) audit(ctx context.Context, ownerID, paymentID uuid.UUID, eventType string, data map[string]any) error {
+func (s *Service) audit(ctx context.Context, ownerID, paymentID uuid.UUID, eventType string, data map[string]any) error {
 	return s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
 		return s.auditWithQueries(ctx, q, ownerID, paymentID, eventType, data)
 	})
 }
 
-func (s *PaymentService) auditWithQueries(ctx context.Context, q *sqlc.Queries, ownerID, paymentID uuid.UUID, eventType string, data map[string]any) error {
+func (s *Service) auditWithQueries(ctx context.Context, q *sqlc.Queries, ownerID, paymentID uuid.UUID, eventType string, data map[string]any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("encode audit event: %w", err)

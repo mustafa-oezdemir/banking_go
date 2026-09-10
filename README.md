@@ -220,9 +220,13 @@ For a control-by-control source file map and the remaining real-bank requirement
 .
 ├── backend/
 │   ├── cmd/                    API and worker entry points
-│   ├── internal/api/           HTTP handlers and middleware
-│   ├── internal/service/       Ledger, payments, seeds and scheduler
-│   ├── internal/sepa/          IBAN validation and generation
+│   ├── internal/identity/      Credential and password policy
+│   ├── internal/account/       IBAN and customer profile rules
+│   ├── internal/ledger/        Money and double-entry operations
+│   ├── internal/payment/       Payment lifecycle, VoP and scheduling
+│   ├── internal/notification/  Provider-neutral notification port
+│   ├── internal/platform/      HTTP, database, email and bootstrap adapters
+│   ├── internal/architecture/  Enforced module dependency rules
 │   └── postgres/               Migrations, queries and sqlc output
 ├── frontend/
 │   ├── app/                    Next.js routes

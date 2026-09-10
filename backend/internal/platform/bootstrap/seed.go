@@ -1,3 +1,4 @@
+// Package bootstrap initializes explicitly configured demo and administrator data.
 package bootstrap
 
 import (
@@ -16,7 +17,7 @@ import (
 	"github.com/mustafa-oezdemir/banking_go/internal/identity"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
@@ -29,7 +30,7 @@ type demoUser struct {
 
 // SeedDemoData creates a deterministic, fictional data set. Every write uses a
 // unique constraint, a stable idempotency key, or an explicit existence check.
-func SeedDemoData(ctx context.Context, store *db.Store, ledgerService *ledger.LedgerService, payments *payment.PaymentService) error {
+func SeedDemoData(ctx context.Context, store *db.Store, ledgerService *ledger.Service, payments *payment.Service) error {
 	demoPassword := os.Getenv("DEMO_SEED_PASSWORD")
 	if len(demoPassword) < 15 || len(demoPassword) > 72 {
 		return errors.New("DEMO_SEED_PASSWORD must contain between 15 and 72 bytes")
@@ -119,7 +120,7 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledgerService *ledger.Le
 }
 
 // SeedConfiguredAdmin provisions the explicitly configured administrator independently of demo data.
-func SeedConfiguredAdmin(ctx context.Context, store *db.Store, ledgerService *ledger.LedgerService) error {
+func SeedConfiguredAdmin(ctx context.Context, store *db.Store, ledgerService *ledger.Service) error {
 	email := strings.ToLower(strings.TrimSpace(os.Getenv("ADMIN_SEED_EMAIL")))
 	password := os.Getenv("ADMIN_SEED_PASSWORD")
 	if email == "" && password == "" {
@@ -185,7 +186,7 @@ func createConfiguredAdminAccount(ctx context.Context, store *db.Store, ownerID 
 	})
 }
 
-func ensureSeedPayment(ctx context.Context, store *db.Store, payments *payment.PaymentService, input payment.CreatePaymentInput) error {
+func ensureSeedPayment(ctx context.Context, store *db.Store, payments *payment.Service, input payment.CreatePaymentInput) error {
 	order, err := store.GetPaymentOrderByIdempotency(ctx, sqlc.GetPaymentOrderByIdempotencyParams{
 		OwnerID: input.OwnerID, IdempotencyKey: input.IdempotencyKey,
 	})
@@ -200,7 +201,7 @@ func ensureSeedPayment(ctx context.Context, store *db.Store, payments *payment.P
 	}
 
 	if order.Status == payment.PaymentAwaitingConfirmation {
-		if _, err = payments.ConfirmPayment(ctx, input.OwnerID, order.ID, order.VopResult != VoPMatch); err != nil {
+		if _, err = payments.ConfirmPayment(ctx, input.OwnerID, order.ID, order.VopResult != payment.VoPMatch); err != nil {
 			return fmt.Errorf("confirm seed payment: %w", err)
 		}
 	}
@@ -255,7 +256,7 @@ func createSeedAccount(ctx context.Context, store *db.Store, ownerID uuid.UUID, 
 	})
 }
 
-func ensureBalance(ctx context.Context, store *db.Store, ledgerService *ledger.LedgerService, account sqlc.Account, desired string) error {
+func ensureBalance(ctx context.Context, store *db.Store, ledgerService *ledger.Service, account sqlc.Account, desired string) error {
 	entries, err := store.ListEntriesByAccount(ctx, sqlc.ListEntriesByAccountParams{AccountID: account.ID, Limit: 1, Offset: 0})
 	if err != nil {
 		return err

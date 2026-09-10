@@ -1,4 +1,5 @@
-// Package sepa contains simulation-safe SEPA primitives. It never performs
+// Package account contains customer-account rules and simulation-safe SEPA
+// primitives. It never performs
 // network calls and cannot route real payments.
 package account
 

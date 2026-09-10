@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/google/uuid"
 
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
 
 // RequireActiveSession rejects cryptographically valid JWTs revoked by logout or role changes.

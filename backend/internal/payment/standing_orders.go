@@ -34,7 +34,7 @@ type CreateStandingOrderInput struct {
 }
 
 // CreateStandingOrder creates an active recurring payment owned by the source-account holder.
-func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateStandingOrderInput) (sqlc.StandingOrder, error) {
+func (s *Service) CreateStandingOrder(ctx context.Context, input CreateStandingOrderInput) (sqlc.StandingOrder, error) {
 	input.BeneficiaryName = strings.TrimSpace(input.BeneficiaryName)
 	input.BeneficiaryIBAN = sepa.NormalizeIBAN(input.BeneficiaryIBAN)
 	input.TransferType = strings.ToUpper(strings.TrimSpace(input.TransferType))
@@ -96,7 +96,7 @@ func (s *PaymentService) CreateStandingOrder(ctx context.Context, input CreateSt
 }
 
 // UpdateStandingOrder changes the mutable fields of an owner-authorized standing order.
-func (s *PaymentService) UpdateStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID, amount, purpose, status string, endDate *time.Time, maxOccurrences *int32) (sqlc.StandingOrder, error) {
+func (s *Service) UpdateStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID, amount, purpose, status string, endDate *time.Time, maxOccurrences *int32) (sqlc.StandingOrder, error) {
 	value, err := ledger.ParseEURAmount(amount)
 	if err != nil {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
@@ -126,7 +126,7 @@ func (s *PaymentService) UpdateStandingOrder(ctx context.Context, ownerID, order
 }
 
 // CancelStandingOrder prevents a standing order from creating new occurrences.
-func (s *PaymentService) CancelStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID) (sqlc.StandingOrder, error) {
+func (s *Service) CancelStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID) (sqlc.StandingOrder, error) {
 	order, err := s.store.DeleteStandingOrder(ctx, sqlc.DeleteStandingOrderParams{StandingOrderID: orderID, OwnerID: ownerID})
 	if err == sql.ErrNoRows {
 		return sqlc.StandingOrder{}, ErrInvalidPaymentState

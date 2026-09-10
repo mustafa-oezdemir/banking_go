@@ -18,6 +18,11 @@ func TestIsSerializationError(t *testing.T) {
 	assert.False(t, isSerializationError(errors.New("some other error")))
 }
 
+func TestIsUniqueViolation(t *testing.T) {
+	assert.True(t, IsUniqueViolation(&pq.Error{Code: "23505"}))
+	assert.False(t, IsUniqueViolation(errors.New("some other error")))
+}
+
 func TestRetryWait(t *testing.T) {
 	// Backoff should grow exponentially and cap at one second.
 	assert.Equal(t, 50*time.Millisecond, retryWait(0))

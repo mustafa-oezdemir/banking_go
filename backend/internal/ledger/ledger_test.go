@@ -15,14 +15,14 @@ import (
 	_ "github.com/lib/pq"
 
 	sepa "github.com/mustafa-oezdemir/banking_go/internal/account"
-	"github.com/mustafa-oezdemir/banking_go/internal/platform/database"
+	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
-// setupTestLedger and helpers would be implemented to provide a testable LedgerService and test DB.
+// setupTestLedger and helpers would be implemented to provide a testable Service and test DB.
 // For demonstration, these are placeholders. In a real repo, use test containers or a test DB.
 
-func setupTestLedger(t *testing.T) *LedgerService {
+func setupTestLedger(t *testing.T) *Service {
 	// Keep test database configuration separate from the application database.
 	dbURL := os.Getenv("TEST_DB_URL")
 	if dbURL == "" {
@@ -41,11 +41,11 @@ func setupTestLedger(t *testing.T) *LedgerService {
 	}
 	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
 	store := db.NewStore(sqlDB)
-	ledger := NewLedgerService(store)
+	ledger := NewService(store)
 	return ledger
 }
 
-func createTestAccount(t *testing.T, ledger *LedgerService, balance string) uuid.UUID {
+func createTestAccount(t *testing.T, ledger *Service, balance string) uuid.UUID {
 	// Use a unique account name for each test run
 	accName := "Test Account " + uuid.New().String()
 
@@ -74,7 +74,7 @@ func mustDemoIBAN(t *testing.T) string {
 	return iban
 }
 
-func getAccountBalance(t *testing.T, ledger *LedgerService, accountID uuid.UUID) string {
+func getAccountBalance(t *testing.T, ledger *Service, accountID uuid.UUID) string {
 	balance, err := ledger.store.GetAccountBalance(context.Background(), accountID)
 	require.NoError(t, err)
 	return balance

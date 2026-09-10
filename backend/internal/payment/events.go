@@ -1,3 +1,4 @@
+// Package payment owns payment intents, lifecycle transitions, and scheduling.
 package payment
 
 import (

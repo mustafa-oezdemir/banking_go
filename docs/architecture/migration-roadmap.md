@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Phase 0 baseline plan
+Status: Phase 1 completed; Phase 2 awaits explicit start
 
 Last updated: 2026-09-10
 
@@ -14,8 +14,8 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 
 | Phase | Outcome | Production topology change |
 | --- | --- | --- |
-| 0. Baseline analysis | Current/target architecture, risks, invariants, and migration decision documented | None |
-| 1. Establish domain boundaries | Explicit Identity, Customer/Account, Payment, Ledger, Notification, and Platform modules | None |
+| 0. Baseline analysis | Completed: current/target architecture, risks, invariants, and migration decision documented | None |
+| 1. Establish domain boundaries | Completed: explicit Identity, Customer/Account, Payment, Ledger, Notification, and Platform modules with an import fitness test | None |
 | 2. Modularize banking backend | HTTP and PostgreSQL become adapters around module application interfaces | None |
 | 3. Extract notification service | Notification owns delivery and its private persistence | One new optional service |
 | 4. Introduce async notification events | Durable outbox, broker, inbox/deduplication, retries | Broker only if justified |
