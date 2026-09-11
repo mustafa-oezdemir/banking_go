@@ -23,6 +23,7 @@ import {
 	updateProfile,
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { normalizePlainText, plainTextError } from "@/lib/inputValidation";
 import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, Payment, StandingOrder } from "@/lib/types";
 import { TransferWizard } from "./TransferWizard";
 
@@ -429,9 +430,18 @@ function ProfileSection({ email }: { email: string }) {
 	});
 	const save = async (event: React.FormEvent) => {
 		event.preventDefault();
+		const fields: Array<[keyof CustomerProfileUpdate, string, number, boolean]> = [
+			["full_name", "Vollständiger Name", 100, true], ["phone", "Telefonnummer", 32, true],
+			["address_line1", "Straße und Hausnummer", 120, true], ["address_line2", "Adresszusatz", 120, false],
+			["postal_code", "Postleitzahl", 12, true], ["city", "Ort", 80, true], ["country_code", "Ländercode", 2, true],
+		];
+		for (const [key, label, max, required] of fields) {
+			const validation = plainTextError(form[key], label, { required, min: key === "country_code" ? 2 : undefined, max });
+			if (validation) { setFailed(true); setMessage(validation); return; }
+		}
 		setSaving(true); setMessage(""); setFailed(false);
 		try {
-			const result = await updateProfile({ ...form, country_code: form.country_code.trim().toUpperCase() });
+			const result = await updateProfile({ ...form, full_name: normalizePlainText(form.full_name), phone: normalizePlainText(form.phone), address_line1: normalizePlainText(form.address_line1), address_line2: normalizePlainText(form.address_line2), postal_code: normalizePlainText(form.postal_code), city: normalizePlainText(form.city), country_code: normalizePlainText(form.country_code).toUpperCase() });
 			if (!result.response.ok) throw new Error("Profil konnte nicht gespeichert werden.");
 			setProfile(result.data);
 			setForm({ full_name: result.data.full_name, phone: result.data.phone, birth_date: result.data.birth_date, address_line1: result.data.address_line1, address_line2: result.data.address_line2, postal_code: result.data.postal_code, city: result.data.city, country_code: result.data.country_code });

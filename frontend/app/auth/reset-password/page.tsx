@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { resetPassword } from "@/lib/api";
+import { passwordError } from "@/lib/inputValidation";
 
 function ResetPasswordForm() {
 	const searchParams = useSearchParams();
@@ -18,6 +19,8 @@ function ResetPasswordForm() {
 		const data = new FormData(event.currentTarget);
 		const password = String(data.get("password") || "");
 		const confirmation = String(data.get("confirmation") || "");
+		const passwordValidation = passwordError(password, true);
+		if (passwordValidation) { setMessage(passwordValidation); return; }
 		if (password !== confirmation) {
 			setMessage("Die Passwörter stimmen nicht überein.");
 			return;
