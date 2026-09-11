@@ -169,7 +169,7 @@ if (-not $rabbitPasswordMatch.Success -or
     Write-Host "Guvenli RABBITMQ_PASSWORD otomatik olusturuldu." -ForegroundColor Yellow
 }
 
-foreach ($serviceDatabaseSecret in @("BANKING_DB_PASSWORD", "IDENTITY_DB_PASSWORD", "NOTIFICATION_DB_PASSWORD")) {
+foreach ($serviceDatabaseSecret in @("BANKING_DB_PASSWORD", "IDENTITY_DB_PASSWORD", "NOTIFICATION_DB_PASSWORD", "GRAFANA_ADMIN_PASSWORD")) {
     $serviceDatabaseMatch = [regex]::Match($envContent, "(?m)^$serviceDatabaseSecret=(.*)$")
     if (-not $serviceDatabaseMatch.Success -or
         $serviceDatabaseMatch.Groups[1].Value.Trim().Length -lt 32 -or
@@ -203,7 +203,7 @@ foreach ($serviceDatabaseSecret in @("BANKING_DB_PASSWORD", "IDENTITY_DB_PASSWOR
     }
 }
 
-Write-Host "PostgreSQL, RabbitMQ, MailHog ve Notification servisi baslatiliyor..." -ForegroundColor Cyan
+Write-Host "PostgreSQL, RabbitMQ, Prometheus, Grafana, MailHog ve servisler baslatiliyor..." -ForegroundColor Cyan
 & docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120 postgres rabbitmq mailhog notification-service
 if ($LASTEXITCODE -ne 0) {
     & docker compose ps -a

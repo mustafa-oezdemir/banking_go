@@ -1,0 +1,19 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {"type":"stat","title":"RabbitMQ target","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"up{job=\"rabbitmq\"}","refId":"A"}],"gridPos":{"h":6,"w":6,"x":0,"y":0},"options":{"reduceOptions":{"calcs":["lastNotNull"],"values":false}}},
+    {"type":"stat","title":"Ready messages","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum(rabbitmq_detailed_queue_messages_ready{queue=~\"notification\\\\.payment(\\\\.v1|\\\\.retry|\\\\.dlq)\"})","refId":"A"}],"gridPos":{"h":6,"w":6,"x":6,"y":0},"options":{"reduceOptions":{"calcs":["lastNotNull"],"values":false}}},
+    {"type":"stat","title":"DLQ ready messages","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"rabbitmq_detailed_queue_messages_ready{queue=\"notification.payment.dlq\"}","refId":"A"}],"gridPos":{"h":6,"w":6,"x":12,"y":0},"options":{"reduceOptions":{"calcs":["lastNotNull"],"values":false}}},
+    {"type":"stat","title":"Consumers","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum(rabbitmq_detailed_queue_consumers{queue=~\"notification\\\\.payment(\\\\.v1|\\\\.retry|\\\\.dlq)\"})","refId":"A"}],"gridPos":{"h":6,"w":6,"x":18,"y":0},"options":{"reduceOptions":{"calcs":["lastNotNull"],"values":false}}},
+    {"type":"timeseries","title":"Payment notification queue depth","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"rabbitmq_detailed_queue_messages_ready{queue=~\"notification\\\\.payment(\\\\.v1|\\\\.retry|\\\\.dlq)\"}","legendFormat":"{{queue}}","refId":"A"}],"gridPos":{"h":10,"w":12,"x":0,"y":6}},
+    {"type":"timeseries","title":"Payment notification consumers","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"rabbitmq_detailed_queue_consumers{queue=~\"notification\\\\.payment(\\\\.v1|\\\\.retry|\\\\.dlq)\"}","legendFormat":"{{queue}}","refId":"A"}],"gridPos":{"h":10,"w":12,"x":12,"y":6}}
+  ],
+  "schemaVersion": 41,
+  "tags": ["demobank", "rabbitmq", "outbox"],
+  "templating": {"list": []},
+  "time": {"from":"now-1h","to":"now"},
+  "title": "DemoBank - RabbitMQ Messaging",
+  "uid": "demobank-rabbitmq-messaging",
+  "version": 1
+}

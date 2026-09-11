@@ -1,0 +1,17 @@
+groups:
+  - name: rabbitmq-notification-queues
+    rules:
+      - alert: RabbitMQMetricsTargetDown
+        expr: up{job="rabbitmq"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: RabbitMQ Prometheus endpoint is unavailable.
+      - alert: NotificationDeadLetterQueueHasMessages
+        expr: rabbitmq_detailed_queue_messages_ready{queue="notification.payment.dlq"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Payment notification dead-letter queue has messages.

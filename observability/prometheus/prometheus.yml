@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # RabbitMQ's aggregate endpoint is inexpensive and provides node/broker
+  # health without producing a time series for every queue or connection.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  # This deliberately collects detailed queue series only for the three
+  # queues owned by the payment-notification flow.
+  - job_name: rabbitmq_notification_queues
+    metrics_path: /metrics/detailed
+    params:
+      family:
+        - queue_coarse_metrics
+        - queue_consumer_count
+        - queue_delivery_metrics
+      vhost:
+        - "/"
+      queue:
+        - "^notification\\.payment(\\.v1|\\.retry|\\.dlq)$"
+    static_configs:
+      - targets: ["rabbitmq:15692"]
