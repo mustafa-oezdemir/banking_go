@@ -23,7 +23,6 @@ const (
 	passwordResetTokenBytes = 32
 	passwordResetLifetime   = 15 * time.Minute
 	passwordResetJobTimeout = 20 * time.Second
-	passwordResetBodyLimit  = 4 << 10
 	signupOpeningBalance    = "500.00"
 )
 
@@ -51,9 +50,7 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Email string `json:"email"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, passwordResetBodyLimit+1))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		// Keep malformed requests indistinguishable from unknown accounts. The
 		// route-level rate limit still protects this public endpoint.
 		input.Email = ""

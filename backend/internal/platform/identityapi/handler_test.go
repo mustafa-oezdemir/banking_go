@@ -138,9 +138,9 @@ func TestForgotPasswordKnownAndUnknownReturnSameResponseBeforeWork(t *testing.T)
 	unknown.dispatch = func(job func()) { unknownJobs = append(unknownJobs, job) }
 
 	knownResponse := httptest.NewRecorder()
-	known.Routes().ServeHTTP(knownResponse, httptest.NewRequest(http.MethodPost, "/forgot-password", strings.NewReader(`{"email":"known@example.test"}`)))
+	known.Routes().ServeHTTP(knownResponse, jsonRequest(http.MethodPost, "/forgot-password", `{"email":"known@example.test"}`))
 	unknownResponse := httptest.NewRecorder()
-	unknown.Routes().ServeHTTP(unknownResponse, httptest.NewRequest(http.MethodPost, "/forgot-password", strings.NewReader(`{"email":"unknown@example.test"}`)))
+	unknown.Routes().ServeHTTP(unknownResponse, jsonRequest(http.MethodPost, "/forgot-password", `{"email":"unknown@example.test"}`))
 
 	assert.Equal(t, http.StatusAccepted, knownResponse.Code)
 	assert.Equal(t, knownResponse.Body.String(), unknownResponse.Body.String())
@@ -164,7 +164,7 @@ func TestResetPasswordRevokesBankingSessions(t *testing.T) {
 	require.NoError(t, err)
 	token := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	response := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/reset-password", strings.NewReader(`{"token":"`+token+`","new_password":"UniqueResetPassword2026!"}`)))
+	handler.Routes().ServeHTTP(response, jsonRequest(http.MethodPost, "/reset-password", `{"token":"`+token+`","new_password":"UniqueResetPassword2026!"}`))
 	require.Equal(t, http.StatusOK, response.Code)
 	assert.Equal(t, []uuid.UUID{userID}, provisioner.revoked)
 }
