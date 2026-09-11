@@ -115,7 +115,7 @@ DEMO_SEED=true
 DEMO_SEED_PASSWORD=<unique-secret-with-15-to-72-bytes>
 ```
 
-The idempotent seed creates the fictional users `helga.müller@pehlione.com`, `jonas.schneider@pehlione.com` and `sofia.wagner@pehlione.com`, demo accounts, beneficiaries and sample payments. All names, addresses, balances and transactions must remain fictional; never enter real personal data in a demo environment.
+The idempotent seed creates the fictional users `helga.mueller@pehlione.com`, `jonas.schneider@pehlione.com` and `sofia.wagner@pehlione.com`, demo accounts, beneficiaries and sample payments. All names, addresses, balances and transactions must remain fictional; never enter real personal data in a demo environment.
 
 ### Hybrid local development (Windows)
 

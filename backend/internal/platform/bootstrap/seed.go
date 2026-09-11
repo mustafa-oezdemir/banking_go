@@ -42,7 +42,7 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledgerService *ledger.Se
 
 	helga, err := ensureDemoUser(
 		ctx, store, "helga.mueller@pehlione.com", "Helga Müller", 3100, demoHash,
-		"helga.mueller@pehlione.com",
+		"helga.müller@pehlione.com",
 	)
 	if err != nil {
 		return err
