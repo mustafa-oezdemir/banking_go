@@ -102,6 +102,38 @@ if (-not $notificationTokenMatch.Success -or
     Write-Host "Guvenli NOTIFICATION_SERVICE_TOKEN otomatik olusturuldu." -ForegroundColor Yellow
 }
 
+$internalServiceTokenMatch = [regex]::Match($envContent, "(?m)^INTERNAL_SERVICE_TOKEN=(.*)$")
+if (-not $internalServiceTokenMatch.Success -or
+    $internalServiceTokenMatch.Groups[1].Value.Trim().Length -lt 32 -or
+    $internalServiceTokenMatch.Groups[1].Value.Contains("replace-with")) {
+    $randomBytes = New-Object byte[] 32
+    $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $randomGenerator.GetBytes($randomBytes)
+        $internalServiceToken = [Convert]::ToBase64String($randomBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    }
+    finally {
+        $randomGenerator.Dispose()
+    }
+    $internalServiceTokenLine = "INTERNAL_SERVICE_TOKEN=$internalServiceToken"
+    if ($internalServiceTokenMatch.Success) {
+        $envContent = [regex]::Replace(
+            $envContent,
+            "(?m)^INTERNAL_SERVICE_TOKEN=.*$",
+            [Text.RegularExpressions.MatchEvaluator]{ param($match) $internalServiceTokenLine },
+            1
+        )
+    }
+    else {
+        if ($envContent.Length -gt 0 -and -not $envContent.EndsWith("`n")) {
+            $envContent += [Environment]::NewLine
+        }
+        $envContent += $internalServiceTokenLine + [Environment]::NewLine
+    }
+    [IO.File]::WriteAllText($envPath, $envContent, (New-Object Text.UTF8Encoding($false)))
+    Write-Host "Guvenli INTERNAL_SERVICE_TOKEN otomatik olusturuldu." -ForegroundColor Yellow
+}
+
 $rabbitPasswordMatch = [regex]::Match($envContent, "(?m)^RABBITMQ_PASSWORD=(.*)$")
 if (-not $rabbitPasswordMatch.Success -or
     $rabbitPasswordMatch.Groups[1].Value.Trim().Length -lt 32 -or

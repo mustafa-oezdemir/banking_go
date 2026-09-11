@@ -23,14 +23,19 @@ Umfang: Go-API, Next.js-Frontend, PostgreSQL-Ledger, Docker und CI/CD
 flowchart LR
     Browser["Next.js-Browserclient"]
     Proxy["Next.js-Proxy und CSP"]
-    API["Go-/Chi-API"]
-    Auth["JWT und serverseitige Session-Version"]
+    Gateway["Go Gateway"]
+    Identity["Identity Service"]
+    API["Banking API"]
+    Auth["15-Minuten-JWT: Issuer + Audience"]
     Service["Payment- und Ledger-Services"]
     DB[("PostgreSQL")]
     CI["CI-Sicherheitsscans"]
 
     Browser -->|"HttpOnly-Cookie und CSRF-Header"| Proxy
-    Proxy --> API
+    Proxy --> Gateway
+    Gateway --> Identity
+    Gateway --> API
+    Identity --> Auth
     API --> Auth
     Auth --> Service
     Service -->|"Serializable Transaction und Row Lock"| DB
@@ -44,7 +49,7 @@ flowchart LR
 | -------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------- |
 | XSS-Schutz                       | 🟡 Teilweise             | `frontend/proxy.ts`, React-Komponenten, `backend/internal/platform/email/resend.go`                 |
 | Schutz vor SQL Injection         | ✅ Umgesetzt             | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go`, `backend/sqlc.yaml`        |
-| JWT und Sessions                 | ✅ Demo-Niveau           | `backend/internal/platform/httpapi/middleware.go`, `backend/internal/platform/httpapi/security.go`                   |
+| JWT und Sessions                 | ✅ Demo-Niveau           | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go`                   |
 | Passwortsicherheit               | ✅ Umgesetzt             | `backend/internal/identity/credentials.go`, `password_reset_handler.go`                                 |
 | CSRF und CORS                    | ✅ Umgesetzt             | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts`         |
 | BOLA-/IDOR-Autorisierung         | ✅ Umgesetzt             | API-Handler, Owner-gefilterte SQL-Abfragen und Service-Prüfungen                              |
@@ -69,6 +74,8 @@ flowchart LR
 | Begrenzung von Formularen und Base-URI         | `frontend/proxy.ts`                                                                                | `form-action 'self'` und `base-uri 'self'` begrenzen die Wirkung von Injection und manipulierten Basis-URLs.                                                                                                                   |
 | React Standard-Escaping                        | `frontend/components/**/*.tsx`                                                                     | Benutzerdaten werden als JSX-Text gerendert. Bei der Prüfung wurden keine Verwendungen von`dangerouslySetInnerHTML`, `innerHTML`, `eval` oder `document.write` gefunden.                                                  |
 | Isolierter Notification Service               | `backend/cmd/notification-service/main.go`, `backend/internal/platform/notificationapi/handler.go`, `backend/internal/platform/rabbitmq/` | Der Service liest keine Banking-Tabellen; Bearer-Token mit mindestens 32 Zeichen, striktes JSON, 64-KiB-Limit, Correlation-ID und begrenzte Timeouts schützen die private API. Er schreibt nur seine eigene Event-ID-Tabelle `notification.processed_events`. |
+| Isolierter Identity Service | `backend/cmd/identity-service/main.go`, `backend/internal/platform/identityapi/`, `backend/internal/platform/identitystore/` | Registrierung, Passwort-Hash, Login und Reset-Tokens liegen nur im `identity`-Schema. Banking hat keinen Abfrageweg zu den Identity-Tabellen; neue Kunden entstehen nur über einen separaten token-geschützten Provisioning-Befehl. |
+| Gateway-Grenze und Telemetrie-Datenschutz | `backend/internal/platform/gateway/`, `backend/internal/platform/observability/` | Das Gateway begrenzt Bodies auf 1 MiB, setzt Sicherheitsheader und entfernt private Service-Tokens aus Browser-Anfragen. Traces/Logs enthalten keine Passwörter, JWTs, Reset-Tokens, IBANs, Salden oder E-Mail-Payloads. |
 | Transactional Outbox und RabbitMQ | `backend/internal/platform/outbox/`, `backend/internal/platform/rabbitmq/`, `backend/postgres/migrations/000013_add_transactional_outbox.up.sql` | Die Zahlungs-/Ledger-Transaktion committet das Event in die Outbox; Broker-Publishing folgt erst danach. Persistente Nachrichten/Publisher-Confirm, Retry-Queue, DLQ und idempotente Consumer begrenzen Dual-Write- und Duplicate-Risiken; Exactly-once wird nicht behauptet. |
 | HTML-Escaping und lokales Abfangen von E-Mails | `backend/internal/platform/email/resend.go`, `backend/internal/platform/email/smtp.go`, `docker-compose.yml` | Name, Konto, Betrag, Gegenpartei und Verwendungszweck aus expliziten Commands werden kontextgerecht escaped. Lokal fängt MailHog SMTP ab; Produktion kann Resend HTTPS verwenden. |
 | Schutz vor MIME Sniffing                       | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go`                                    | Sendet`X-Content-Type-Options: nosniff`.                                                                                                                                                                                         |
@@ -104,12 +111,12 @@ flowchart LR
 
 | Kontrolle                                    | Datei                                                                                | Beschreibung                                                                                                                                  |
 | -------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| HS256-Signatur und Mindestlänge des Secrets | `backend/internal/platform/httpapi/middleware.go`                                               | `JWT_SECRET` ist verpflichtend und mindestens 32 Zeichen lang; der Algorithmus ist serverseitig festgelegt.                                 |
-| Standard-Claims                              | `backend/internal/platform/httpapi/middleware.go`                                               | Erzeugt`iss`, `aud`, `jti`, `iat`, `nbf`, `exp` und `user_id`. Die Token-Laufzeit beträgt zwei Stunden.                        |
-| HttpOnly-Cookie                              | `backend/internal/platform/httpapi/middleware.go`                                               | Das Token ist nicht für JavaScript sichtbar. Das Cookie verwendet`HttpOnly`, `SameSite=Strict` und bei produktivem HTTPS `Secure`.     |
-| Serverseitiger Widerruf                      | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/database/admin.go`               | Die JWT-`session_version` wird mit der Datenbank verglichen. Logout sowie Passwort- oder Rollenänderungen machen ältere Tokens ungültig. |
+| HS256-Signatur und Mindestlänge des Secrets | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go`                                               | `JWT_SECRET` ist verpflichtend und mindestens 32 Zeichen lang; der Algorithmus ist serverseitig festgelegt.                                 |
+| Standard-Claims und Validierung | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` | Identity erzeugt `iss=pehlione-identity`, `aud=pehlione-banking-api`, `jti`, `iat`, `nbf`, `exp` und `user_id`; Banking validiert Signatur, Issuer und Audience. Die Token-Laufzeit beträgt 15 Minuten. |
+| HttpOnly-Cookie | `backend/internal/platform/identityapi/handler.go` | Das Token ist nicht für JavaScript sichtbar. Das Cookie verwendet `HttpOnly`, `SameSite=Strict` und bei produktivem HTTPS `Secure`. |
+| Service-Grenze | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/identitystore/` | Banking prüft, dass der Token-Subject ein eigener Customer ist, liest aber keine Identity-Session-/Credential-Daten. Browser-Logout löscht das Cookie sofort; die kurze Token-Laufzeit begrenzt das Risiko gestohlener Tokens. |
 | Trennung vom Client-State                    | `frontend/lib/store/authStore.ts`                                                  | localStorage enthält nur E-Mail-/UI-Hydration-Daten, niemals das JWT. Die tatsächliche Session wird über`/session` geprüft.             |
-| SSE-Ablauf und Widerruf                      | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE endet bei Token-Ablauf, prüft die Session-Version erneut und begrenzt Verbindungen pro Benutzer.                                         |
+| SSE-Ablauf | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE endet bei Token-Ablauf und begrenzt Verbindungen pro Benutzer. |
 
 ### Zusätzliche Anforderungen für eine reale Bank
 

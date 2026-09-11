@@ -23,12 +23,15 @@ import (
 	emailservice "github.com/mustafa-oezdemir/banking_go/internal/platform/email"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationapi"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationstore"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/observability"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/rabbitmq"
 )
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Str("service", "notification").Logger()
+	shutdownTelemetry := observability.Init(context.Background(), "notification-service")
+	defer func() { _ = shutdownTelemetry(context.Background()) }()
 	if err := godotenv.Load(".env", "../.env"); err != nil {
 		log.Debug().Err(err).Msg("Notification .env file not loaded; using process environment")
 	}
@@ -82,7 +85,7 @@ func main() {
 	}
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           handler.Routes(),
+		Handler:           observability.HTTP("notification-service", handler.Routes()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,

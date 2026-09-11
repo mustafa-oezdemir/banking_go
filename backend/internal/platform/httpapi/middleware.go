@@ -19,9 +19,11 @@ var (
 
 const (
 	sessionCookieName = "jwt"
-	sessionDuration   = 2 * time.Hour
-	tokenIssuer       = "pehlione-banking"
-	tokenAudience     = "pehlione-banking-web"
+	sessionDuration   = 15 * time.Minute
+	// Tokens are issued by the Identity service. Banking only validates them
+	// before applying its own customer/account authorization rules.
+	tokenIssuer   = "pehlione-identity"
+	tokenAudience = "pehlione-banking-api"
 )
 
 // InitTokenAuthFromEnv initializes JWT auth using the JWT_SECRET environment variable.

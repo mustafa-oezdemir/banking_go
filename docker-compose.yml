@@ -39,6 +39,19 @@ services:
       retries: 12
       start_period: 10s
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:16686/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   notification-service:
     build:
       context: .
@@ -57,6 +70,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
       NOTIFICATION_DB_HOST: postgres
       NOTIFICATION_DB_PORT: 5432
       NOTIFICATION_DB_NAME: ${DB_NAME:-simple_ledger}
@@ -80,14 +95,45 @@ services:
       retries: 12
       start_period: 5s
 
+  identity-service:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.identity
+    restart: unless-stopped
+    environment:
+      IDENTITY_PORT: 8081
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-simple_ledger}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      BANKING_INTERNAL_URL: http://banking-api:${PORT:-8080}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
+      NOTIFICATION_SERVICE_URL: http://notification-service:8090
+      NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
   banking-api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
-    ports:
-      # BACKEND_PORT is public; PORT is the backend's container listening port.
-      - "${BACKEND_PORT:-8383}:${PORT:-8080}"
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -96,6 +142,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000}
       DEMO_SEED: ${DEMO_SEED:-false}
       DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
@@ -105,6 +152,8 @@ services:
       RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
       NOTIFICATION_SERVICE_URL: http://notification-service:8090
       NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-banking}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}@rabbitmq:5672/
       RABBITMQ_RETRY_DELAY: ${RABBITMQ_RETRY_DELAY:-5s}
       RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-3}
@@ -114,6 +163,8 @@ services:
       postgres:
         condition: service_healthy
       notification-service:
+        condition: service_healthy
+      jaeger:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -128,18 +179,45 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_API_URL: http://banking-api:${PORT:-8080}
+        BACKEND_API_URL: http://gateway:8082
     restart: unless-stopped
     environment:
-      BACKEND_API_URL: http://banking-api:${PORT:-8080}
+      BACKEND_API_URL: http://gateway:8082
       NEXT_TELEMETRY_DISABLED: 1
     ports:
       - "3000:3000"
     depends_on:
-      banking-api:
+      gateway:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.gateway
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8383}:8082"
+    environment:
+      GATEWAY_PORT: 8082
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      BANKING_API_URL: http://banking-api:${PORT:-8080}
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    depends_on:
+      identity-service:
+        condition: service_healthy
+      banking-api:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8082/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12

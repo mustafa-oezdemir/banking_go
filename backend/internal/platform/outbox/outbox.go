@@ -58,6 +58,17 @@ func NewRepository(database *sql.DB) (*Repository, error) {
 	return &Repository{db: database}, nil
 }
 
+// Backlog reports committed events that have not yet received broker
+// confirmation. It is intentionally a count only: payloads remain out of
+// operational telemetry.
+func (repository *Repository) Backlog(ctx context.Context) (int64, error) {
+	var count int64
+	if err := repository.db.QueryRowContext(ctx, `SELECT count(*) FROM outbox_events WHERE published_at IS NULL`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count outbox backlog: %w", err)
+	}
+	return count, nil
+}
+
 // ClaimBatch leases unpublished rows. A crashed publisher's lease expires,
 // allowing another publisher to deliver the same event at least once.
 func (repository *Repository) ClaimBatch(ctx context.Context, limit int, lease time.Duration) ([]notification.EventEnvelope, error) {

@@ -28,6 +28,12 @@ jobs:
           - service: notification
             context: .
             dockerfile: backend/Dockerfile.notification
+          - service: identity
+            context: .
+            dockerfile: backend/Dockerfile.identity
+          - service: gateway
+            context: .
+            dockerfile: backend/Dockerfile.gateway
     permissions:
       contents: read
       packages: write

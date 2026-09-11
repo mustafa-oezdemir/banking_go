@@ -74,6 +74,8 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux go build -trimpath -o ledger ./cmd/main.go
           CGO_ENABLED=0 GOOS=linux go build -trimpath -o notification-service ./cmd/notification-service
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o identity-service ./cmd/identity-service
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o gateway ./cmd/gateway
 
       - name: Upload backend artifact
         uses: actions/upload-artifact@v6
@@ -82,6 +84,8 @@ jobs:
           path: |
             backend/ledger
             backend/notification-service
+            backend/identity-service
+            backend/gateway
           retention-days: 7
 
   frontend-check:

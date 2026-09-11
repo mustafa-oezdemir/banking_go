@@ -17,7 +17,9 @@ import (
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
 
-// RequireActiveSession rejects cryptographically valid JWTs revoked by logout or role changes.
+// RequireActiveSession verifies that a valid Identity subject is also a Banking
+// Customer. Identity owns credential and session state; Banking deliberately
+// does not duplicate or query that state across service boundaries.
 func RequireActiveSession(store *db.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,35 +28,12 @@ func RequireActiveSession(store *db.Store) func(http.Handler) http.Handler {
 				respondError(w, http.StatusUnauthorized, "invalid token")
 				return
 			}
-			version, err := tokenSessionVersion(r)
-			if err != nil {
-				respondError(w, http.StatusUnauthorized, "invalid token")
-				return
-			}
-			persisted, err := store.GetUserSessionVersion(r.Context(), userID)
-			if err != nil || persisted != version {
-				respondError(w, http.StatusUnauthorized, "session expired")
+			if _, err := store.GetUserByID(r.Context(), userID); err != nil {
+				respondError(w, http.StatusUnauthorized, "customer access denied")
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
-	}
-}
-
-func tokenSessionVersion(r *http.Request) (int64, error) {
-	_, claims, err := jwtauth.FromContext(r.Context())
-	if err != nil {
-		return 0, err
-	}
-	switch value := claims["session_version"].(type) {
-	case float64:
-		return int64(value), nil
-	case int64:
-		return value, nil
-	case json.Number:
-		return value.Int64()
-	default:
-		return 0, errors.New("session_version claim missing")
 	}
 }
 

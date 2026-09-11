@@ -38,6 +38,9 @@ const signupOpeningBalance = "500.00"
 
 // NewCustomer is the credential and display data required for atomic customer provisioning.
 type NewCustomer struct {
+	// IdentityID is the Identity Service subject. It is deliberately optional for
+	// legacy bootstrap data but required by the private provisioning endpoint.
+	IdentityID     uuid.UUID
 	Email          string
 	HashedPassword string
 	FullName       string

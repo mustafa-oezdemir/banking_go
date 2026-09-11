@@ -17,6 +17,8 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
@@ -80,9 +82,6 @@ func New(config Config, directory ActivityDirectory, httpClient *http.Client) (*
 	if len(config.Token) < 32 {
 		return nil, errors.New("notification service token must contain at least 32 characters")
 	}
-	if directory == nil {
-		return nil, errors.New("notification activity directory is required")
-	}
 	if config.Timeout <= 0 {
 		config.Timeout = defaultTimeout
 	}
@@ -120,6 +119,9 @@ func (client *Client) SendPasswordReset(ctx context.Context, email, fullName, to
 func (client *Client) NotifyActivity(ctx context.Context, activity notification.Activity) error {
 	if !client.Enabled() {
 		return nil
+	}
+	if client.directory == nil {
+		return errors.New("notification activity directory is required")
 	}
 	if activity.UserID == uuid.Nil || activity.AccountID == uuid.Nil {
 		return notification.ErrInvalidCommand
@@ -159,6 +161,7 @@ func (client *Client) post(ctx context.Context, path string, command any) error 
 		requestID = uuid.NewString()
 	}
 	request.Header.Set("X-Request-ID", requestID)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(request.Header))
 
 	response, err := client.httpClient.Do(request)
 	if err != nil {

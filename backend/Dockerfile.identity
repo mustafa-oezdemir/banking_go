@@ -1,0 +1,17 @@
+FROM golang:1.26.8-alpine AS builder
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/. .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/identity-service ./cmd/identity-service
+
+FROM alpine:3.21
+WORKDIR /app
+COPY --from=builder /out/identity-service /usr/local/bin/identity-service
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN adduser -D -u 10003 identity
+USER identity
+ENV IDENTITY_PORT=8081 SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt TZ=UTC
+EXPOSE 8081
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1:8081/health || exit 1
+ENTRYPOINT ["/usr/local/bin/identity-service"]

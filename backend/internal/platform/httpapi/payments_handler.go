@@ -492,11 +492,6 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	sessionVersion, err := tokenSessionVersion(r)
-	if err != nil {
-		respondError(w, http.StatusUnauthorized, "invalid token")
-		return
-	}
 	expiresAt, err := tokenExpiry(r)
 	if err != nil {
 		respondError(w, http.StatusUnauthorized, "invalid token")
@@ -568,10 +563,6 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ticker.C:
-			persistedVersion, versionErr := h.store.GetUserSessionVersion(r.Context(), ownerID)
-			if versionErr != nil || persistedVersion != sessionVersion {
-				return
-			}
 			if _, err = fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
 				return
 			}

@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Architecture Phase 4 completed
+Status: Architecture Phase 7 completed
 
 Last updated: 2026-09-11
 
@@ -18,10 +18,10 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 | 1. Establish domain boundaries | Completed: explicit Identity, Customer/Account, Payment, Ledger, Notification, and Platform modules with an import fitness test | None |
 | 2. Modularize banking backend | Completed: critical domain rules are pure; Ledger, Profile, and Authentication use application ports; payment ACID exception is documented | None |
 | 3. Extract notification service | Completed: independent HTTP service owns SMTP/Resend delivery and reads no Banking tables | One new service |
-| 4. Introduce async notification events | Durable outbox, broker, inbox/deduplication, retries | Broker only if justified |
-| 5. Extract identity service | Credentials and sessions move behind an Identity contract and private database | One new service |
-| 6. Introduce gateway and service auth | Stable external routing and authenticated internal calls | Gateway only if needed |
-| 7. Add distributed observability | Cross-service logs, metrics, traces, and SLO-oriented dashboards | Telemetry components as needed |
+| 4. Introduce async notification events | Completed: durable outbox, broker, inbox/deduplication, retries | RabbitMQ |
+| 5. Extract identity service | Completed: credentials and sessions are owned by an Identity contract and schema | One new service |
+| 6. Introduce gateway and service auth | Completed: stable external routing and authenticated internal calls | Gateway |
+| 7. Add distributed observability | Completed: cross-service logs, metrics and traces | Jaeger |
 | 8. Harden architecture and contracts | Compatibility, resilience, security, recovery, and operations gates | No required new service |
 
 ## Phase 0 — Baseline analysis
@@ -125,55 +125,41 @@ Exit criteria:
 - normal duplicate broker delivery does not create a second provider call;
 - broker outage delays delivery without rolling back or blocking ledger booking.
 
-## Phase 5 — Extract identity service
+## Phase 5 — Extract identity service (completed)
 
 Goal: move credentials, login/session policy, and password reset behind an independently owned service and database.
 
-Required decisions:
+Delivered:
 
-- whether profile/contact data remains Customer-owned or moves with Identity;
-- role authority and propagation model;
-- token issuer/key rotation and internal authorization model;
-- migration of existing password hashes, reset tokens, and session versions;
-- behavior during Identity unavailability.
+- independent `identity-service` executable/container with its own `identity` schema;
+- registration, bcrypt credential handling, login, password-reset tokens and cookie/JWT issuance moved behind the Identity HTTP contract;
+- explicit Identity User versus Banking Customer boundary, with one private idempotent provisioning command;
+- existing local credential records copied once during additive migration 000014;
+- contract tests for registration, login and invalid credentials, plus gateway-level unauthorized-access verification.
 
-Incremental path:
+Identity is required for authentication changes, but Banking validates an already issued 15-minute access token locally and never reads the Identity schema.
 
-1. Introduce an in-process Identity application interface.
-2. Add contract tests and a separate Identity executable/database.
-3. Migrate data with reconciliation and rollback scripts.
-4. Route login/reset operations to Identity.
-5. Replace Banking Core user foreign-key assumptions with stable external identity IDs where needed.
-
-Do not let Identity read Banking Core tables or Banking Core read Identity tables.
-
-## Phase 6 — Introduce gateway and service authentication
+## Phase 6 — Introduce gateway and service authentication (completed)
 
 Goal: keep browser contracts stable as internal deployables appear.
 
-Use the current Next.js rewrite layer as the starting point. Introduce a dedicated gateway only if routing, policy enforcement, or operational ownership outgrows the web/BFF.
+Delivered:
 
-Planned work when justified:
+- small Go gateway is the only browser-facing backend port; Identity and Banking ports are private to Compose;
+- identity paths route to Identity while all Banking routes preserve their existing shape;
+- request IDs, body limits, browser headers, bounded upstream handling and Prometheus-compatible gateway metrics are enforced at the edge;
+- the private Identity-to-Banking provisioning call uses a separate constant-time-compared service token.
 
-- stable external routes and version policy;
-- explicit browser-session termination point;
-- service identities and short-lived credentials;
-- authorization propagation with documented freshness;
-- remote-call timeout, retry, circuit-breaker, and idempotency policy;
-- no direct public exposure of internal services.
-
-## Phase 7 — Distributed observability
+## Phase 7 — Distributed observability (completed)
 
 Goal: make a multi-process request and asynchronous event traceable end to end.
 
-Planned work:
+Delivered:
 
-- common correlation/causation propagation;
-- service/version fields in structured logs;
-- request latency/error, transaction retry, scheduler, outbox, consumer, and delivery metrics;
-- OpenTelemetry tracing when cross-service troubleshooting warrants it;
-- separate liveness/readiness probes;
-- dashboards and alerts focused on user-visible failure and backlog, not infrastructure noise.
+- structured service logs and propagated request/correlation IDs;
+- OpenTelemetry W3C trace propagation from Gateway through Identity and Banking to Jaeger via OTLP/HTTP;
+- gateway request/failure counters and latency logs, plus a Banking outbox-backlog gauge;
+- independent health checks and operational runbooks for PostgreSQL, RabbitMQ, Notification and outbox failure scenarios.
 
 PII, secrets, JWTs, raw tokens, and unmasked financial identifiers remain excluded from telemetry.
 
@@ -216,8 +202,9 @@ The following gates apply to every phase:
 | ADR-005 | 4 | RabbitMQ messaging topology and publisher confirmation |
 | ADR-006 | 4 | Transactional outbox and database/broker consistency boundary |
 | ADR-007 | 4 | At-least-once idempotent Notification consumer semantics |
-| ADR-008 | 5 | Identity data split, token authority, and migration |
-| ADR-009 | 6 | Gateway and service authentication |
-| ADR-010 | 7 | Telemetry standards and sensitive-data policy |
+| ADR-008 | 5 | Identity service extraction and data ownership |
+| ADR-009 | 5 | Browser and service authentication model |
+| ADR-010 | 6 | API gateway scope and routing |
+| ADR-011 | 7 | Observability stack and sensitive-data policy |
 
 Create an ADR only when the decision is actually made; do not pre-decide technology to fill the sequence.

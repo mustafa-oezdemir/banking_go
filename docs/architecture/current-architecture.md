@@ -1,16 +1,16 @@
 # Current Architecture
 
-Status: Architecture Phase 4 with RabbitMQ and a transactional outbox
+Status: Architecture Phase 7 with Identity, Gateway, and distributed observability
 
 Last verified: 2026-09-11
 
-Scope: Phase 4 completion state
+Scope: Phase 4–7 completion state
 
 ## Purpose and system boundary
 
 Pehlione DemoBank is a learning and portfolio application. It simulates EUR accounts, SEPA-style payments, scheduled payments, and double-entry bookkeeping. It does not connect to a bank, payment rail, or real-money provider.
 
-The Banking Core remains a modular monolith: a Next.js frontend and one Go banking backend share PostgreSQL, with an optional worker over the same code and schema. Notification is separately deployed, owns email-provider delivery and a processed-event inbox, and never queries Banking-owned tables.
+The Banking Core remains a modular monolith for Account, Payment and Ledger. Identity is a separate Go service that owns its `identity` schema and session issuance; Banking owns Customers and accounts and never queries Identity persistence. Notification is separately deployed, owns email-provider delivery and a processed-event inbox, and never queries Banking-owned tables.
 
 ## C4 level 1: system context
 
@@ -32,6 +32,8 @@ flowchart LR
 flowchart LR
     Browser["Browser"]
     Frontend["Next.js frontend\nport 3000"]
+    Gateway["Gateway\nGo edge router"]
+    Identity["Identity service\nGo/Chi port 8081"]
     API["Banking API\nGo/Chi"]
     Notification["Notification service\nGo/Chi port 8090"]
     Scheduler["In-process scheduler"]
@@ -42,7 +44,11 @@ flowchart LR
     Resend["Resend API"]
 
     Browser -->|"HTTP; HttpOnly JWT cookie"| Frontend
-    Frontend -->|"same-origin rewrites"| API
+    Frontend -->|"same-origin rewrites"| Gateway
+    Gateway -->|"auth routes"| Identity
+    Gateway -->|"banking routes"| API
+    Identity -->|"private customer provision"| API
+    Identity -->|"identity schema only"| DB
     API --> DB
     Scheduler --> DB
     Worker -. "alternative/optional polling" .-> DB
@@ -55,7 +61,7 @@ flowchart LR
     API -->|"SSE refresh signals"| Browser
 ```
 
-Docker Compose starts `postgres`, `rabbitmq`, `mailhog`, `notification-service`, `banking-api`, and `frontend`. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled. `cmd/worker` is built into the backend image but is not a default Compose service. `docker-compose.dev.yml` adds a migration profile and a container that runs the Mage-built Linux Banking API binary.
+Docker Compose starts `postgres`, `rabbitmq`, `jaeger`, `mailhog`, `notification-service`, `identity-service`, `banking-api`, `gateway`, and `frontend`. Only Gateway is the browser-facing backend entry point; Notification remains internal. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled.
 
 ## C4 level 3: backend components
 

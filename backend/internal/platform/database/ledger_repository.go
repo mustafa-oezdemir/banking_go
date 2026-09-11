@@ -35,11 +35,16 @@ func (s *LedgerRepository) CreateFundedCustomer(
 ) (ledger.FundedCustomer, error) {
 	var user sqlc.CreateUserRow
 	var customerAccount sqlc.Account
-	err := s.store.ExecTx(ctx, func(q *sqlc.Queries) error {
+	err := s.store.ExecTxWithHandle(ctx, func(q *sqlc.Queries, executor sqlc.DBTX) error {
 		var txErr error
-		user, txErr = q.CreateUser(ctx, sqlc.CreateUserParams{
-			Email: input.Email, HashedPassword: input.HashedPassword, FullName: input.FullName,
-		})
+		if input.IdentityID == uuid.Nil {
+			user, txErr = q.CreateUser(ctx, sqlc.CreateUserParams{
+				Email: input.Email, HashedPassword: input.HashedPassword, FullName: input.FullName,
+			})
+		} else {
+			txErr = executor.QueryRowContext(ctx, `INSERT INTO users (id, email, hashed_password, full_name) VALUES ($1, $2, $3, $4) RETURNING id, email, full_name, created_at`, input.IdentityID, input.Email, "identity-managed", input.FullName).
+				Scan(&user.ID, &user.Email, &user.FullName, &user.CreatedAt)
+		}
 		if txErr != nil {
 			return txErr
 		}

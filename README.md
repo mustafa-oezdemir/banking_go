@@ -12,7 +12,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[Local UI](http://localhost:3000) · [API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Security Report](SECURITY_PENTEST_REPORT.md)
+[Local UI](http://localhost:3000) · [Gateway/API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Jaeger](http://localhost:16686) · [Security Report](SECURITY_PENTEST_REPORT.md)
 
 </div>
 
@@ -52,13 +52,17 @@ The payment state machine uses `DRAFT`, `AWAITING_CONFIRMATION`, `SCHEDULED`, `P
 ```mermaid
 flowchart LR
     Browser["Next.js Banking UI"]
-    API["Go / Chi API"]
+    Gateway["Go API Gateway"]
+    Identity["Identity Service"]
+    API["Banking API"]
     Events["SSE + polling fallback"]
     Scheduler["In-process scheduler"]
     Worker["Optional payment worker"]
     DB[("PostgreSQL")]
 
-    Browser -->|"HTTPS + HttpOnly cookie"| API
+    Browser -->|"HTTPS + HttpOnly cookie"| Gateway
+    Gateway --> Identity
+    Gateway --> API
     API --> Events --> Browser
     API --> DB
     Scheduler --> DB
@@ -95,6 +99,7 @@ docker compose up --build
 | API health | [localhost:8383/health](http://localhost:8383/health) |
 | Swagger UI | [localhost:8383/swagger/index.html](http://localhost:8383/swagger/index.html) |
 | MailHog inbox | [localhost:8425](http://localhost:8425) |
+| Jaeger traces | [localhost:16686](http://localhost:16686) |
 | PostgreSQL | `localhost:5433` |
 
 Stop the stack with `docker compose down`. Add `-v` only when you intentionally want to remove the local PostgreSQL volume.

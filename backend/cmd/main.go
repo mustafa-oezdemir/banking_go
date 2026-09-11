@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	api "github.com/mustafa-oezdemir/banking_go/internal/platform/httpapi"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/notificationclient"
+	"github.com/mustafa-oezdemir/banking_go/internal/platform/observability"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/outbox"
 	"github.com/mustafa-oezdemir/banking_go/internal/platform/rabbitmq"
 )
@@ -221,6 +223,8 @@ func main() {
 	startTime := time.Now()
 
 	initLogger()
+	shutdownTelemetry := observability.Init(context.Background(), "banking-api")
+	defer func() { _ = shutdownTelemetry(context.Background()) }()
 
 	if err := loadEnvironment(); err != nil {
 		zlog.Warn().Err(err).Msg("Failed to load .env file; using system environment")
@@ -311,6 +315,7 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(func(next http.Handler) http.Handler { return observability.HTTP("banking-api", next) })
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(api.SecurityHeaders)
@@ -361,6 +366,21 @@ func main() {
 			zlog.Error().Err(err).Msg("Failed to encode health check response")
 		}
 	})
+	r.Get("/metrics", func(w http.ResponseWriter, request *http.Request) {
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		defer cancel()
+		backlog, err := outboxRepository.Backlog(ctx)
+		if err != nil {
+			zlog.Warn().Err(err).Msg("Unable to collect outbox backlog metric")
+			http.Error(w, "metrics unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		_, _ = w.Write([]byte("# TYPE banking_outbox_backlog gauge\nbanking_outbox_backlog " + strconv.FormatInt(backlog, 10) + "\n"))
+	})
+	// Only the Identity service can provision a Banking Customer. This route is
+	// private in Compose and protected by an independent service token.
+	r.Post("/internal/customers/provision", h.ProvisionCustomerInternal)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),

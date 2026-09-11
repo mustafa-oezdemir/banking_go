@@ -133,7 +133,7 @@ func TestDecodeStrictJSON(t *testing.T) {
 	}
 }
 
-func TestRequireActiveSessionRejectsRevokedToken(t *testing.T) {
+func TestRequireActiveSessionRejectsUnknownBankingSubject(t *testing.T) {
 	h := setupTestHandler(t)
 	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
 	user, err := h.store.CreateUser(t.Context(), sqlc.CreateUserParams{
@@ -157,6 +157,11 @@ func TestRequireActiveSessionRejectsRevokedToken(t *testing.T) {
 		return response
 	}
 	require.Equal(t, http.StatusNoContent, request().Code)
-	require.NoError(t, h.store.RevokeUserSessions(t.Context(), user.ID))
-	require.Equal(t, http.StatusUnauthorized, request().Code)
+	unknownToken, err := GenerateTokenForVersion(uuid.New(), 0)
+	require.NoError(t, err)
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	unknownRequest.Header.Set("Authorization", "Bearer "+unknownToken)
+	unknownResponse := httptest.NewRecorder()
+	router.ServeHTTP(unknownResponse, unknownRequest)
+	require.Equal(t, http.StatusUnauthorized, unknownResponse.Code)
 }

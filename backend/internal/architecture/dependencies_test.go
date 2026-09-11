@@ -66,6 +66,16 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/notification",
 		"internal/platform/database",
 	),
+	"platform/identitystore": allowed(
+		"internal/identity",
+	),
+	"platform/identityapi": allowed(
+		"internal/identity",
+		"internal/platform/identitystore",
+	),
+	"platform/bankingclient":     {},
+	"platform/gateway":           {},
+	"platform/observability":     {},
 	"platform/notificationstore": {},
 	"platform/outbox": allowed(
 		"internal/notification",
@@ -129,7 +139,8 @@ func TestInternalPackageRootsAreIntentional(t *testing.T) {
 		"ledger": true, "notification": true, "payment": true, "platform": true,
 	})
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
-		"bootstrap": true, "database": true, "email": true, "httpapi": true,
+		"bankingclient": true, "bootstrap": true, "database": true, "email": true, "gateway": true, "httpapi": true,
+		"identityapi": true, "identitystore": true, "observability": true,
 		"notificationapi": true, "notificationclient": true, "notificationstore": true,
 		"outbox": true, "rabbitmq": true,
 	})

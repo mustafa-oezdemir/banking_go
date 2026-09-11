@@ -49,3 +49,21 @@ func (Build) NotificationLinux() error {
 	}
 	return sh.RunWithV(env, "go", "build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, "./cmd/notification-service")
 }
+
+// IdentityLinux builds the standalone Identity service for linux/amd64.
+func (Build) IdentityLinux() error {
+	return buildLinux("identity-service", "./cmd/identity-service")
+}
+
+// GatewayLinux builds the public edge gateway for linux/amd64.
+func (Build) GatewayLinux() error {
+	return buildLinux("gateway", "./cmd/gateway")
+}
+
+func buildLinux(name, packagePath string) error {
+	outputPath := filepath.Join("bin", "linux", name)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": "amd64"}, "go", "build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, packagePath)
+}

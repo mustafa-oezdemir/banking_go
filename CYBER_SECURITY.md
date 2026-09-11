@@ -23,14 +23,19 @@ Kapsam: Go API, Next.js frontend, PostgreSQL ledger, Docker ve CI/CD
 flowchart LR
     Browser["Next.js tarayıcı istemcisi"]
     Proxy["Next.js proxy + CSP"]
-    API["Go / Chi API"]
-    Auth["JWT + server-side session version"]
+    Gateway["Go Gateway"]
+    Identity["Identity Service"]
+    API["Banking API"]
+    Auth["15 dk JWT: issuer + audience"]
     Service["Payment ve ledger servisleri"]
     DB[("PostgreSQL")]
     CI["CI güvenlik taramaları"]
 
     Browser -->|"HttpOnly cookie + CSRF header"| Proxy
-    Proxy --> API
+    Proxy --> Gateway
+    Gateway --> Identity
+    Gateway --> API
+    Identity --> Auth
     API --> Auth
     Auth --> Service
     Service -->|"Serializable transaction + row lock"| DB
@@ -44,7 +49,7 @@ flowchart LR
 | --- | --- | --- |
 | XSS savunması | 🟡 Kısmi | `frontend/proxy.ts`, React bileşenleri, `backend/internal/platform/email/resend.go` |
 | SQL injection savunması | ✅ Uygulandı | `backend/postgres/queries/*.sql`, `backend/internal/platform/database/*.go`, `backend/sqlc.yaml` |
-| JWT ve oturum | ✅ Demo seviyesi | `backend/internal/platform/httpapi/middleware.go`, `backend/internal/platform/httpapi/security.go` |
+| JWT ve oturum | ✅ Demo seviyesi | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` |
 | Parola güvenliği | ✅ Uygulandı | `backend/internal/identity/credentials.go`, `password_reset_handler.go` |
 | CSRF ve CORS | ✅ Uygulandı | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go`, `frontend/lib/api.ts` |
 | BOLA/IDOR yetkilendirmesi | ✅ Uygulandı | API handler'ları, owner filtreli SQL sorguları, servis sahiplik kontrolleri |
@@ -69,6 +74,8 @@ flowchart LR
 | Form ve base URI sınırı | `frontend/proxy.ts` | `form-action 'self'` ve `base-uri 'self'` açık yönlendirme/enjeksiyon etkisini sınırlar. |
 | React varsayılan escaping | `frontend/components/**/*.tsx` | Kullanıcı verileri JSX metni olarak render edilir. İncelemede `dangerouslySetInnerHTML`, `innerHTML`, `eval` veya `document.write` sink'i bulunmadı. |
 | İzole Notification servisi | `backend/cmd/notification-service/main.go`, `backend/internal/platform/notificationapi/handler.go`, `backend/internal/platform/rabbitmq/` | Servis Banking tablolarına erişmez; minimum 32 karakterlik bearer token, strict JSON, 64 KiB limit, correlation ID ve bounded timeout kullanır. Yalnızca kendi `notification.processed_events` event-ID tablosuna yazar. |
+| İzole Identity servisi | `backend/cmd/identity-service/main.go`, `backend/internal/platform/identityapi/`, `backend/internal/platform/identitystore/` | Kayıt, parola hash'i, giriş ve reset token'ları yalnız `identity` şemasında tutulur. Banking servisinin Identity tablosuna sorgu yolu yoktur; yeni müşteri yalnız ayrı token'lı özel provision komutuyla oluşturulur. |
+| Gateway sınırı ve telemetry gizliliği | `backend/internal/platform/gateway/`, `backend/internal/platform/observability/` | Gateway 1 MiB body limiti ve güvenlik başlıkları uygular, özel servis token'ını browser'dan gelen isteklerden siler. Trace/log verileri parola, JWT, reset token, IBAN, bakiye veya e-posta payload'ı taşımaz. |
 | Transactional outbox ve RabbitMQ | `backend/internal/platform/outbox/`, `backend/internal/platform/rabbitmq/`, `backend/postgres/migrations/000013_add_transactional_outbox.up.sql` | Ödeme/defter transaction’ı event’i outbox’a commit eder; broker publish commit sonrasıdır. Persistent mesajlar/publisher confirm, retry kuyruğu, DLQ ve idempotent consumer dual-write ve duplicate riskini azaltır; exactly-once iddia edilmez. |
 | E-posta HTML escaping ve yerel yakalama | `backend/internal/platform/email/resend.go`, `backend/internal/platform/email/smtp.go`, `docker-compose.yml` | Açık komuttaki ad, hesap, tutar, karşı taraf ve açıklamalar bağlama uygun escape edilir. Lokal mesajlar MailHog SMTP ile yakalanır; üretimde Resend HTTPS kullanılabilir. |
 | MIME sniffing engeli | `frontend/next.config.ts`, `backend/internal/platform/httpapi/security.go` | `X-Content-Type-Options: nosniff` gönderilir. |
@@ -104,12 +111,12 @@ flowchart LR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| HS256 imza ve minimum secret | `backend/internal/platform/httpapi/middleware.go` | `JWT_SECRET` zorunlu ve en az 32 karakterdir; algoritma uygulama tarafından sabitlenir. |
-| Standart claim'ler | `backend/internal/platform/httpapi/middleware.go` | `iss`, `aud`, `jti`, `iat`, `nbf`, `exp` ve `user_id` claim'leri üretilir. Token ömrü 2 saattir. |
-| HttpOnly cookie | `backend/internal/platform/httpapi/middleware.go` | Token JavaScript'e açılmaz; `HttpOnly`, `SameSite=Strict`, production HTTPS'te `Secure` kullanılır. |
-| Server-side iptal | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/database/admin.go` | JWT içindeki `session_version`, veritabanındaki sürümle karşılaştırılır. Logout, parola veya rol değişimi eski token'ları geçersiz kılar. |
+| HS256 imza ve minimum secret | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` | `JWT_SECRET` zorunlu ve en az 32 karakterdir; algoritma uygulama tarafından sabitlenir. |
+| Standart claim'ler ve doğrulama | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` | Identity `iss=pehlione-identity`, `aud=pehlione-banking-api`, `jti`, `iat`, `nbf`, `exp` ve `user_id` üretir; Banking imza, issuer ve audience doğrular. Token ömrü 15 dakikadır. |
+| HttpOnly cookie | `backend/internal/platform/identityapi/handler.go` | Token JavaScript'e açılmaz; `HttpOnly`, `SameSite=Strict`, production HTTPS'te `Secure` kullanılır. |
+| Servis sınırı | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/identitystore/` | Banking, token subject'inin kendi Customer kaydını kontrol eder ancak Identity session/credential verisini okumaz. Browser logout cookie'yi anında siler; kısa access-token ömrü çalınmış token riskini sınırlar. |
 | Client state ayrımı | `frontend/lib/store/authStore.ts` | localStorage yalnız e-posta/UI hydration bilgisi taşır; JWT localStorage'a yazılmaz. Gerçek oturum `/session` ile doğrulanır. |
-| SSE süresi ve iptali | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE token süresinde kapanır, session sürümünü tekrar kontrol eder ve kullanıcı başına bağlantıyı sınırlar. |
+| SSE süresi | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE token süresinde kapanır ve kullanıcı başına bağlantıyı sınırlar. |
 
 ### Gerçek banka için gereken ek kontroller
 
