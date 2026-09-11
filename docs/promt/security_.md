@@ -1,4 +1,3 @@
-
 Evet. Bu proje için en sağlıklı yöntem **her güvenlik aşamasını bağımsız bir değişiklik paketi olarak tamamlayıp test ettikten sonra ayrı commit + push etmek**. Böylece bir aşama sorun çıkarırsa geri almak, diff'i incelemek ve hangi güvenlik kontrolünün ne zaman eklendiğini görmek kolay olur. Proje talimatındaki yaklaşım da güvenliği mimari, uygulama, API, veri, altyapı, DevSecOps ve detection katmanları halinde ele almayı istiyor.  API kaynağı da AuthN/AuthZ, validation, error handling, rate limiting, data exposure, business logic ve secure coding'i ayrı test alanları olarak ele alıyor.
 
 Ben bunu **18 aşamalık bir security-hardening roadmap** olarak kurardım.
@@ -8,18 +7,1945 @@ Ben bunu **18 aşamalık bir security-hardening roadmap** olarak kurardım.
 Doğrudan `main` üzerine geliştirme yapma. Her aşama için:
 
 ```text
-main
+# PEHLIONE DEMOBANK — SECURITY HARDENING MASTER PROMPT
+
+Repository:
+https://github.com/mustafa-oezdemir/banking_go
+
+Sen bu repository üzerinde çalışan:
+
+- Senior Go Engineer
+- Senior Next.js / React / TypeScript Engineer
+- Application Security Engineer
+- API Security Engineer
+- Security Architect
+- DevSecOps Engineer
+- Blue Team / Detection Engineer
+- Secure Software Development Reviewer
+
+olarak hareket edeceksin.
+
+============================================================
+ANA HEDEF
+============================================================
+
+Bu projeyi mevcut business logic ve mimari kararlarını bozmadan,
+aşamalı olarak daha güvenli hale getir.
+
+Bu çalışma:
+
+"bir scanner çalıştır ve birkaç header ekle"
+
+çalışması değildir.
+
+Amaç:
+
+Understand
+→ Model
+→ Secure
+→ Test
+→ Detect
+→ Respond
+→ Improve
+
+yaklaşımıyla bütün sistemi değerlendirmek ve geliştirmektir.
+
+HER SECURITY PHASE:
+
+1. ayrı branch,
+2. ayrı değişiklik grubu,
+3. test,
+4. security regression,
+5. commit,
+6. push
+
+ile tamamlanacaktır.
+
+Bir phase tamamlanmadan bir sonraki phase'e geçme.
+
+============================================================
+KRİTİK KURAL — PROJE YAPISINI ASLA VARSAYMA
+============================================================
+
+Repository daha önce mimari değişikliklerden geçti.
+
+Bu nedenle daha önceki klasör yollarına, servis sayılarına,
+endpoint listelerine veya security dokümanlarına körü körüne güvenme.
+
+HER PHASE BAŞINDA:
+
+1. latest main'i çek,
+2. mevcut repository tree'yi incele,
+3. ilgili architecture dokümanlarını oku,
+4. mevcut implementasyonu source of truth kabul et,
+5. sonra değişiklik planla.
+
+Özellikle başlangıçta incele:
+
+- README.md
+- SECURITY.md
+- CYBER_SECURITY.md
+- SECURITY_PENTEST_REPORT.md
+
+- docs/architecture/
+- docs/adr/
+- docs/runbooks/
+- docs/observability/
+
+- backend/cmd/
+- backend/internal/
+- backend/postgres/
+- backend/docs/
+
+- frontend/app/
+- frontend/components/
+- frontend/lib/
+- frontend/next.config.*
+- frontend/package.json
+
+- docker-compose.yml
+- docker-compose.dev.yml
+- Dockerfile'lar
+- docker/
+
+- observability/
+
+- .github/workflows/
+- .github/dependabot.yml
+
+Architecture dokümanı ile gerçek kod çelişirse:
+
+CURRENT CODE = SOURCE OF TRUTH
+
+Dokümanı ayrıca güncellemeyi değerlendir.
+
+============================================================
+MEVCUT MİMARİYİ KEŞFET
+============================================================
+
+Başlangıçta özellikle aşağıdaki sınırların halen geçerli olup olmadığını doğrula:
+
+Browser
   ↓
-security/phase-01-baseline
-  ↓ PR/Merge
-main
+Next.js Frontend
   ↓
-security/phase-02-docker-hardening
-  ↓ PR/Merge
-main
+Gateway
+  ├── Identity Service
+  └── Banking API
+          ├── Account
+          ├── Payment
+          └── Ledger
+
+Banking
   ↓
-security/phase-03-secrets
+Transactional Outbox
+  ↓
+RabbitMQ
+  ↓
+Notification Service
+
+PostgreSQL:
+- Banking-owned data
+- Identity-owned schema
+- Notification-owned schema
+
+Ayrıca:
+
+- scheduler
+- optional worker
+- MailHog
+- Resend
+- Prometheus
+- Grafana
+- Jaeger
+
+gibi component'ların güncel durumunu doğrula.
+
+Bir servis kaldırılmış, eklenmiş veya değiştirilmişse
+roadmap'i CURRENT CODE'a göre adapte et.
+
+============================================================
+GIT DELIVERY MODEL — ZORUNLU
+============================================================
+
+HER PHASE ayrı push olacaktır.
+
+Doğrudan main üzerinde çalışma yapma.
+
+Her phase başlangıcı:
+
+git checkout main
+git pull --ff-only
+
+git checkout -b security/phase-XX-short-name
+
+Değişiklikleri tamamladıktan sonra:
+
+1. format
+2. lint
+3. type checking
+4. unit tests
+5. integration tests
+6. security regression
+7. build
+8. git diff review
+
+yap.
+
+Ardından:
+
+git add <yalnız bu phase'e ait dosyalar>
+
+git commit -m "security(phase-XX): <summary>"
+
+git push -u origin security/phase-XX-short-name
+
+FORBIDDEN:
+
+- force push
+- unrelated code changes
+- test silerek fix yapmak
+- security kontrolünü zayıflatarak test geçirmek
+- iki phase'i aynı branch'e koymak
+- iki phase'i tek push ile birleştirmek
+- benim iznim olmadan main'e merge etmek
+
+Push bittikten sonra DUR.
+
+Ben:
+
+"sonraki aşama"
+
+veya:
+
+"phase XX devam"
+
+demeden sonraki aşamayı uygulama.
+
+============================================================
+HER PHASE SONUNDA RAPOR
+============================================================
+
+Şu format zorunlu:
+
+### Phase
+PHASE XX — Name
+
+### Status
+PASS / FAIL / BLOCKED
+
+### Branch
+security/phase-XX-...
+
+### Commit
+commit SHA
+
+### Security Problems Addressed
 ...
+
+### Files Changed
+...
+
+### Tests Executed
+...
+
+### Test Results
+...
+
+### Security Regression
+...
+
+### Residual Risks
+...
+
+### Documentation Updated
+...
+
+### Push
+PUSHED / NOT PUSHED
+
+### Next Phase
+Sadece sıradaki phase'in adını söyle.
+
+UYGULAMA.
+
+============================================================
+VULNERABILITY SINIFLANDIRMASI
+============================================================
+
+Her gözlemi şu kategorilerden biriyle işaretle:
+
+CONFIRMED
+PROBABLE — NEEDS VERIFICATION
+HARDENING
+ALREADY FIXED
+NOT APPLICABLE
+FALSE POSITIVE
+
+Scanner finding'i otomatik olarak CONFIRMED değildir.
+
+Kanıt olmadan vulnerability var deme.
+
+============================================================
+KORUNACAK BANKING SECURITY INVARIANTS
+============================================================
+
+Aşağıdaki davranışlar future refactor sırasında bozulmamalıdır.
+
+Mevcut kodda hâlâ geçerli olup olmadığını önce doğrula.
+
+Financial:
+
+- Her financial movement double-entry olmalıdır.
+- Debit ve credit eşit olmalıdır.
+- Ledger append-only kalmalıdır.
+- Correction gerekiyorsa compensating entry yaklaşımı korunmalıdır.
+- Cached balance ile ledger mutation aynı transaction içinde kalmalıdır.
+- Para için binary floating point kullanılmamalıdır.
+- Currency doğrulanmalıdır.
+- Negative/zero/overflow-like amounts reddedilmelidir.
+- Insufficient funds kontrolü korunmalıdır.
+- Transaction ordering/locking semantics bozulmamalıdır.
+- Idempotency korunmalıdır.
+- Duplicate payment yaratılmamalıdır.
+- Race condition double-spend'e yol açmamalıdır.
+
+Authorization:
+
+- Customer yalnız izin verilen kendi resource'larına erişebilmelidir.
+- Başka customer'ın account/payment/transaction/profile verisine erişememelidir.
+- Internal/system account'lar customer tarafından kullanılamamalıdır.
+- Admin privilege server-side doğrulanmalıdır.
+- UUID randomness authorization değildir.
+- Frontend authorization enforcement güvenlik kontrolü değildir.
+
+Authentication:
+
+- Session revocation korunmalıdır.
+- Logout güvenli olmalıdır.
+- Password changes/reset sonrası gerekli session invalidation yapılmalıdır.
+- Token/cookie security zayıflatılmamalıdır.
+
+Microservices:
+
+- Bir service başka service'in private persistence'ına izinsiz erişmemelidir.
+- Service-data ownership boundary korunmalıdır.
+- Cross-service communication açık contract üzerinden olmalıdır.
+- Event consumer'lar duplicate event karşısında güvenli olmalıdır.
+- Transactional outbox guarantees bozulmamalıdır.
+
+============================================================
+GLOBAL INPUT SECURITY POLICY
+============================================================
+
+Bu bölüm BÜTÜN PHASE'LER için zorunludur.
+
+Kullanıcı tarafından kontrol edilebilen HER INPUT untrusted kabul edilir.
+
+Kaynaklar yalnız form değildir:
+
+- HTML forms
+- React inputs
+- JSON body
+- query parameters
+- path parameters
+- headers
+- cookies
+- SSE-related inputs
+- API commands
+- admin inputs
+- profile fields
+- beneficiary fields
+- payment descriptions
+- account names
+- search/filter fields
+- RabbitMQ/event payloads
+- service-to-service HTTP payloads
+- environment-derived externally controlled values
+- file uploads varsa file metadata/content
+
+FRONTEND VALIDATION:
+
+Frontend validation uygulanmalıdır ancak:
+
+FRONTEND VALIDATION = UX / EARLY REJECTION
+
+SECURITY BOUNDARY DEĞİLDİR.
+
+BACKEND VALIDATION:
+
+BACKEND = AUTHORITATIVE SECURITY CONTROL
+
+Attacker frontend'i tamamen bypass ederek API'ye doğrudan istek gönderebilir.
+
+============================================================
+HTML / SCRIPT / XSS INPUT POLICY
+============================================================
+
+Plain-text olması gereken hiçbir kullanıcı alanında HTML markup kabul etme.
+
+Örneğin aşağıdakiler plain text ise:
+
+- first name
+- last name
+- account name
+- beneficiary name
+- payment description
+- transfer description
+- address fields
+- city
+- reference text
+- admin-entered labels
+
+HTML çalıştırmaya yönelik veya markup içeren payload'lar
+frontend ve backend tarafından kontrol edilmelidir.
+
+ÖRNEK TEST PAYLOAD'LARI:
+
+<script>alert(1)</script>
+
+<img src=x onerror=alert(1)>
+
+<svg onload=alert(1)>
+
+<svg/onload=alert(1)>
+
+"><script>alert(1)</script>
+
+<a href="javascript:alert(1)">click</a>
+
+<iframe src="javascript:alert(1)"></iframe>
+
+<body onload=alert(1)>
+
+<input autofocus onfocus=alert(1)>
+
+<div onclick=alert(1)>test</div>
+
+HTML comment / malformed markup varyasyonları da düşün.
+
+ÖNEMLİ:
+
+Sadece "<script>" substring blacklist'i YAPMA.
+
+Örneğin:
+
+strings.Contains(value, "<script>")
+
+tek başına güvenlik çözümü değildir.
+
+Field plain text ise field-specific validation uygula.
+
+Tercih:
+
+allowlist
++
+length restriction
++
+normalization
++
+semantic validation
++
+safe output encoding
+
+Plain-text bir alan HTML'e ihtiyaç duymuyorsa:
+
+markup kabul edilmemelidir.
+
+Ancak kullanıcı verisini temizlemek adına kontrolsüz regex sanitization yapma.
+
+Rich text gereken gerçek bir alan ortaya çıkarsa:
+
+- bunu plain-text policy'den açıkça ayır,
+- mature allowlist HTML sanitizer kullan,
+- server-side sanitize et,
+- output context'i ayrıca güvenli tut.
+
+Rich text gerekmiyorsa HTML sanitizer eklemek yerine
+HTML'i input olarak reddetmek daha doğrudur.
+
+============================================================
+FRONTEND FORM SECURITY
+============================================================
+
+Bütün mevcut form component'larını envantere çıkar.
+
+Next.js/React tarafında özellikle ara:
+
+- <form>
+- <input>
+- <textarea>
+- <select>
+- contentEditable
+- dynamic rendering
+- dangerouslySetInnerHTML
+
+Her input için tanımla:
+
+Field:
+Expected data type:
+Required:
+Min length:
+Max length:
+Allowed characters:
+Normalization:
+Business rule:
+Backend equivalent:
+
+Örneğin:
+
+Account Name
+
+Expected:
+plain text
+
+Allowed:
+letters
+numbers
+space
+selected punctuation if business requires
+
+Rejected:
+HTML markup
+control characters
+oversized input
+
+Frontend:
+
+- submit öncesi validation
+- kullanıcıya güvenli hata mesajı
+- maxlength
+- uygun input type
+- autocomplete policy
+- trim/normalization gerektiğinde
+
+uygula.
+
+Fakat frontend'de bir validation varsa backend'de karşılığı olmak zorundadır.
+
+============================================================
+BACKEND INPUT VALIDATION
+============================================================
+
+Go backend'de bütün HTTP boundary'lerini tara.
+
+Özellikle:
+
+backend/internal/platform/httpapi/
+backend/internal/platform/identityapi/
+backend/internal/platform/notificationapi/
+
+ve güncel equivalent path'leri.
+
+Merkezi ve yeniden kullanılabilir validation yaklaşımını değerlendir.
+
+Kontrol et:
+
+- malformed JSON
+- unknown properties
+- trailing JSON
+- missing required fields
+- type mismatch
+- invalid UUID
+- invalid enum
+- oversized strings
+- empty strings
+- whitespace-only values
+- HTML/markup in plain-text fields
+- control characters
+- CR/LF injection
+- null bytes
+- invalid Unicode
+- amount precision
+- amount maximum
+- amount minimum
+- negative numbers
+- pagination maximum
+- malformed dates
+- invalid IBAN
+- malformed email
+- normalization ambiguity
+
+Business validation ile syntactic validation'ı ayır.
+
+Örnek:
+
+JSON parsing
+  ↓
+struct/schema validation
+  ↓
+canonical normalization
+  ↓
+domain/business rules
+  ↓
+authorization
+  ↓
+mutation
+
+Backend validation hatası predictable ve güvenli olmalı.
+
+Client'a:
+
+500 + internal error
+
+dönme.
+
+============================================================
+XSS DEFENSE-IN-DEPTH
+============================================================
+
+Input validation tek XSS savunması değildir.
+
+Ayrıca doğrula:
+
+- React escaping korunuyor mu?
+- dangerouslySetInnerHTML var mı?
+- raw HTML render ediliyor mu?
+- URL attributes güvenli mi?
+- javascript: scheme girebilir mi?
+- stored user data daha sonra HTML context'te render ediliyor mu?
+- error messages user-controlled HTML içeriyor mu?
+- toast/message component'ları escaping'i bypass ediyor mu?
+
+Output encoding context-specific olmalıdır.
+
+Ayrıca:
+
+Content-Security-Policy
+X-Content-Type-Options
+Referrer-Policy
+frame-ancestors
+HSTS (production HTTPS)
+
+gibi browser controls değerlendir.
+
+CSP input validation'ın yerine geçmez.
+
+============================================================
+SQL / COMMAND / OTHER INJECTION POLICY
+============================================================
+
+SQL injection'ı:
+
+"SELECT", "DROP", "' OR 1=1"
+
+stringlerini blacklist ederek çözmeye çalışma.
+
+Ana kontrol:
+
+PARAMETERIZED QUERIES
+
+sqlc veya parameter binding varsa bunu koru.
+
+Field semantics ayrıca validation ile sınırlandırılabilir.
+
+Aynı yaklaşım:
+
+- command injection
+- header injection
+- log injection
+- template injection
+- path traversal
+- SSRF
+- unsafe URL handling
+
+için de bağlama uygun şekilde uygulanmalıdır.
+
+============================================================
+SECURITY TEST PAYLOAD SUITE
+============================================================
+
+Validation phase'inde regression tests ekle.
+
+En az şu sınıfları düşün:
+
+HTML/XSS:
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+<svg/onload=alert(1)>
+"><script>alert(1)</script>
+
+SQL-like hostile input:
+' OR 1=1--
+"; DROP TABLE users; --
+
+Bu payload'ları SQL blacklist testi olarak değil,
+parameterization regression amacıyla kullan.
+
+Control characters:
+\r\n
+\x00
+tabs/newlines where forbidden
+
+Unicode:
+very long combining sequences
+unusual whitespace
+bidirectional control characters where relevant
+
+Boundary:
+empty
+whitespace-only
+max length
+max length + 1
+huge body
+
+Numeric:
+-1
+0
+0.001
+too many decimals
+extremely large values
+
+JSON:
+unknownProperty
+duplicate semantic inputs where parser behavior matters
+multiple JSON documents
+wrong type
+
+Her test business expectation ile eşleşmelidir.
+
+============================================================
+PHASE ROADMAP
+============================================================
+
+------------------------------------------------------------
+PHASE 00 — CURRENT ARCHITECTURE & SECURITY BASELINE
+------------------------------------------------------------
+
+Branch:
+
+security/phase-00-security-baseline
+
+Amaç:
+
+Hiçbir security fix yapmadan güncel sistemi yeniden keşfet.
+
+İncele:
+
+- actual repository tree
+- C4/current architecture
+- ADRs
+- routes
+- services
+- schemas
+- message flows
+- frontend forms
+- external interfaces
+- CI
+- Docker
+- observability
+
+Çıktı oluştur/güncelle:
+
+docs/security/security-baseline.md
+
+İçerik:
+
+- Assets
+- Actors
+- Entry Points
+- Services
+- Trust Boundaries
+- Public Interfaces
+- Internal Interfaces
+- Data Ownership
+- Authentication Boundaries
+- Message Boundaries
+- Critical Security Invariants
+- Attack Surface
+- Existing Controls
+- Known Gaps
+
+Bu phase'te production behavior değiştirme.
+
+Commit:
+
+security(phase-00): establish current security baseline
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 01 — INPUT SURFACE INVENTORY & VALIDATION CONTRACT
+------------------------------------------------------------
+
+Branch:
+
+security/phase-01-input-contract
+
+Bütün input yüzeylerini envantere çıkar:
+
+Frontend forms
+API bodies
+query/path
+admin inputs
+service commands
+message payloads
+
+Her field için validation contract oluştur.
+
+Örnek tablo:
+
+Field | Context | Type | Required | Min | Max | Allowed Format | HTML Allowed | Backend Rule
+
+DEFAULT:
+
+HTML Allowed = NO
+
+yalnız gerçek business requirement varsa YES.
+
+Önce validation architecture oluştur.
+
+Bu phase esas olarak contract + shared design + tests preparation'dır.
+
+Gereksiz refactor yapma.
+
+Commit:
+
+security(phase-01): define input validation security contract
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 02 — FRONTEND FORM & CLIENT-SIDE VALIDATION
+------------------------------------------------------------
+
+Branch:
+
+security/phase-02-frontend-validation
+
+Bütün gerçek form component'larını tara.
+
+Özellikle:
+
+auth
+password reset
+profile
+accounts
+transfers
+payments
+beneficiaries
+standing orders
+admin forms
+
+Mevcut repository'deki gerçek formları kullan.
+
+Eski isimleri varsayma.
+
+Uygula:
+
+- field-specific validation
+- maxlength
+- normalization
+- type validation
+- HTML rejection for plain-text fields
+- safe client error rendering
+- unsafe rendering removal
+- shared validation helpers yalnız gerçekten faydalıysa
+
+Frontend şu payload'ları mümkün olduğunca submit etmeden reddetsin:
+
+<script>...</script>
+<img ... onerror=...>
+<svg ...>
+diğer markup
+
+Ancak backend kontrolü henüz authoritative olmaya devam edecektir.
+
+Frontend validation'a güvenerek backend validation azaltılmayacak.
+
+Test:
+
+- lint
+- type-check
+- build
+- applicable frontend tests
+
+Commit:
+
+security(phase-02): harden frontend form validation
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 03 — BACKEND AUTHORITATIVE INPUT VALIDATION
+------------------------------------------------------------
+
+Branch:
+
+security/phase-03-backend-validation
+
+EN KRİTİK validation phase.
+
+Bütün public/backend request DTO ve handlers'ı tara.
+
+Plain text alanlarda HTML/markup server-side reddedilsin.
+
+Frontend bypass edilip doğrudan API çağrıldığında da payload reddedilmelidir.
+
+Uygula:
+
+- central reusable validators where sensible
+- strict request decoding
+- size limits
+- required fields
+- semantic allowlists
+- HTML/markup rejection
+- UUID validation
+- enum validation
+- amount validation
+- date validation
+- IBAN validation
+- email validation
+- normalization
+
+GLOBAL "reject any < character everywhere" gibi
+business context'i bozan kaba çözüm yapma.
+
+Her field'i kendi semantics'ine göre değerlendir.
+
+Örneğin plain text description için markup reddedilebilir.
+
+Password field'ına gereksiz karakter blacklist'i uygulama.
+Güçlü password normal kullanıcı karakterlerini desteklemelidir.
+
+Authorization token gibi opaque values üzerinde HTML validator kullanma.
+
+Test doğrudan HTTP/API seviyesinde yapılmalı:
+
+frontend bypass
+→ API request
+→ rejection
+
+Özellikle XSS payload regression tests ekle.
+
+Commit:
+
+security(phase-03): enforce authoritative backend input validation
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 04 — SAFE OUTPUT RENDERING, XSS & BROWSER SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-04-xss-browser-hardening
+
+Ara:
+
+dangerouslySetInnerHTML
+innerHTML equivalents
+unsafe URLs
+raw markup
+dynamic script creation
+user-controlled href/src
+
+Output encoding davranışını doğrula.
+
+Security headers/CSP'yi mevcut Next.js/Gateway topology'ye göre tasarla.
+
+CSP'yi uygulamadan önce Next.js requirements'ı doğrula.
+
+Gereksiz unsafe-inline ekleme.
+
+Stored XSS regression testi düşün:
+
+malicious-looking string
+→ persistence
+→ retrieval
+→ frontend display
+
+Execution olmamalı.
+
+Commit:
+
+security(phase-04): harden xss and browser security controls
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 05 — AUTHENTICATION & SESSION SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-05-auth-session
+
+Identity service ve Gateway dahil bütün auth flow'u analiz et.
+
+Kontrol:
+
+- login
+- logout
+- register
+- session
+- password change
+- JWT/session issuance
+- cookie flags
+- issuer/audience
+- algorithm
+- expiration
+- session revocation
+- role/status changes
+- replay
+- logout
+
+Identity Service extraction sonrası eski Banking auth kodunun
+halen reachable olup olmadığını özellikle doğrula.
+
+Duplicate auth implementations varsa risk analizi yap.
+
+Commit:
+
+security(phase-05): harden authentication and session lifecycle
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 06 — CSRF, CORS, ORIGIN & COOKIE SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-06-browser-request-security
+
+Gateway/Frontend topology üzerinden incele:
+
+- CSRF
+- Origin
+- Fetch Metadata
+- SameSite
+- Secure
+- HttpOnly
+- CORS
+- credentials
+- trusted origins
+- cross-service exposure
+
+Gateway arkasındaki internal service'lerin public browser security
+varsayımlarına körü körüne güvenmemesini kontrol et.
+
+Commit:
+
+security(phase-06): harden csrf cors and cookie boundaries
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 07 — AUTHORIZATION / BOLA / BFLA / PROPERTY SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-07-authorization
+
+Endpoint/resource authorization matrix oluştur.
+
+Test:
+
+Customer A
+vs
+Customer B
+vs
+Admin
+vs
+Anonymous
+vs
+System/Internal account
+
+Kontrol:
+
+- BOLA
+- IDOR
+- BFLA
+- property-level authorization
+- mass assignment
+- admin endpoints
+- account ownership
+- payment ownership
+- transaction ownership
+- beneficiaries
+- standing orders
+- profile
+- system accounts
+
+Cross-service authorization assumptions da kontrol edilmeli.
+
+Commit:
+
+security(phase-07): strengthen authorization boundaries
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 08 — DATA MINIMIZATION & API RESPONSE SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-08-data-minimization
+
+Response DTO'larını incele.
+
+Customer'a gerekmeyen:
+
+- internal UUID
+- settlement IDs
+- internal schema identifiers
+- service implementation metadata
+- private event data
+- internal error details
+- secrets
+- unrelated customer data
+
+dönmesin.
+
+Domain/storage model doğrudan API contract olmasın.
+
+Commit:
+
+security(phase-08): minimize api data exposure
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 09 — PASSWORD RESET & ACCOUNT RECOVERY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-09-password-reset
+
+Identity/Notification ayrımı sonrası gerçek reset flow'u çıkar.
+
+Analiz:
+
+Browser
+→ Gateway
+→ Identity/Banking?
+→ Notification
+→ Provider
+
+Kontrol:
+
+- enumeration
+- timing discrepancy
+- token entropy
+- hashing/storage
+- expiration
+- single use
+- session revocation
+- multiple reset requests
+- replay
+- logging
+- email delivery
+
+Generic HTTP response yeterli kabul edilmesin;
+timing behavior da analiz edilsin.
+
+Commit:
+
+security(phase-09): harden account recovery workflow
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 10 — RATE LIMITING & ABUSE PROTECTION
+------------------------------------------------------------
+
+Branch:
+
+security/phase-10-abuse-protection
+
+Gateway bulunduğu için rate limiting placement'ını yeniden değerlendir.
+
+Kontrol:
+
+- Gateway
+- Identity
+- Banking API
+- password reset
+- login
+- registration
+- payments
+- admin
+- expensive endpoints
+
+IP tek başına yeterli değildir.
+
+Gerektiğinde:
+
+IP
++
+account
++
+authenticated subject
++
+endpoint
++
+device/session
+
+kombinasyonu değerlendir.
+
+Trusted proxy/X-Forwarded-For spoofing test et.
+
+Multi-instance durumunu düşün.
+
+Commit:
+
+security(phase-10): harden rate limiting and abuse controls
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 11 — SERVICE-TO-SERVICE TRUST & GATEWAY SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-11-service-trust
+
+Yeni mimaride kritik.
+
+Gateway
+Identity
+Banking
+Notification
+
+arasındaki trust model'i incele.
+
+Kontrol:
+
+- internal endpoints public ulaşılabilir mi?
+- service identity nasıl doğrulanıyor?
+- spoofable headers var mı?
+- Gateway trusted identity header yazıyorsa backend bunu kimden kabul ediyor?
+- direct-service access Gateway policy'yi bypass ediyor mu?
+- private notification/password reset routes nasıl korunuyor?
+- service credentials nasıl yönetiliyor?
+
+Sadece network "internal" diye authorization atlama.
+
+Commit:
+
+security(phase-11): harden service to service trust
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 12 — FINANCIAL LOGIC, LEDGER & CONCURRENCY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-12-financial-integrity
+
+Kontrol:
+
+- double entry
+- append-only
+- SERIALIZABLE
+- deterministic locking
+- retries
+- double spend
+- insufficient balance
+- system accounts
+- blocked accounts
+- currency
+- idempotency
+- transaction ID
+- standing orders
+- payment lifecycle
+- cancel/confirm races
+
+Concurrency regression tests ekle.
+
+Commit:
+
+security(phase-12): strengthen financial integrity guarantees
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 13 — PAYMENT AUTHORIZATION / STEP-UP / SCA DESIGN
+------------------------------------------------------------
+
+Branch:
+
+security/phase-13-payment-authorization
+
+Önce threat model.
+
+Login authentication ile transaction authorization'ı ayır.
+
+Payment confirmation şu business data'ya bağlanabilmeli:
+
+- amount
+- currency
+- beneficiary
+- IBAN
+- payment ID / transaction ID
+
+MFA / WebAuthn / step-up architecture değerlendir.
+
+Demo kapsamı nedeniyle implement edilmeyecek production control varsa
+dokümante et, sahte security implementation ekleme.
+
+Commit:
+
+security(phase-13): establish payment authorization security model
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 14 — DATABASE & SERVICE DATA OWNERSHIP
+------------------------------------------------------------
+
+Branch:
+
+security/phase-14-database-boundaries
+
+Mevcut schema ownership model'ini doğrula.
+
+Kontrol:
+
+Banking runtime role
+Identity runtime role
+Notification runtime role
+migration role
+
+Cross-schema access testleri yap.
+
+Least privilege uygula.
+
+Migration user ile runtime user ayrımını koru.
+
+Database exposure/TLS/credentials kontrol et.
+
+Commit:
+
+security(phase-14): harden database and service data boundaries
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 15 — RABBITMQ / OUTBOX / EVENT SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-15-messaging-security
+
+Yeni mimari için kritik.
+
+Kontrol:
+
+- broker credentials
+- broker network exposure
+- producer permissions
+- consumer permissions
+- durable queues
+- event validation
+- schema/version validation
+- poison messages
+- oversized messages
+- duplicate events
+- idempotent consumer
+- processed event IDs
+- replay
+- DLQ strategy
+- event payload data minimization
+- PII in events
+- logs
+
+Untrusted/malformed event payload consumer'ı panic ettirmemeli.
+
+At-least-once semantics göz önüne alınmalı.
+
+Commit:
+
+security(phase-15): harden messaging and event processing
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 16 — EMAIL / NOTIFICATION SECURITY
+------------------------------------------------------------
+
+Branch:
+
+security/phase-16-notification-security
+
+Notification service'i ayrıca incele.
+
+Kontrol:
+
+- SMTP TLS
+- remote plaintext SMTP
+- Resend HTTPS
+- API key
+- template injection
+- email header injection
+- CRLF
+- recipient validation
+- subject/body handling
+- user-controlled HTML email
+- event-driven email
+- reset email
+
+Local MailHog desteği korunabilir.
+
+Production remote SMTP plaintext olmamalıdır.
+
+Commit:
+
+security(phase-16): harden notification delivery security
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 17 — SECRETS & CRYPTOGRAPHIC KEY MANAGEMENT
+------------------------------------------------------------
+
+Branch:
+
+security/phase-17-secrets
+
+Tara:
+
+- JWT keys
+- service credentials
+- RabbitMQ credentials
+- PostgreSQL credentials
+- Resend key
+- SMTP credentials
+- Grafana credentials
+- admin/demo credentials
+- API keys
+- Docker env
+- CI
+
+Production secret source control'da bulunmamalı.
+
+Demo/example values açıkça fake olmalı.
+
+Fail-secure startup kullan.
+
+Rotation planı oluştur.
+
+Commit:
+
+security(phase-17): harden secrets and key management
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 18 — DOCKER & NETWORK RUNTIME HARDENING
+------------------------------------------------------------
+
+Branch:
+
+security/phase-18-runtime-hardening
+
+Docker topology'yi güncel mimariye göre incele.
+
+Hangi port gerçekten host'a publish edilmeli?
+
+Beklenti:
+
+Browser-facing:
+Frontend/Gateway — architecture'a göre
+
+Internal:
+PostgreSQL
+RabbitMQ internal protocol
+Notification
+Identity
+Banking API
+Prometheus
+Jaeger
+MailHog
+Grafana
+
+Her birini business/development requirement'a göre doğrula.
+
+Kontrol:
+
+- localhost dev bindings
+- production exposure
+- internal networks
+- non-root containers
+- read-only filesystem where possible
+- capabilities
+- image versions
+- healthchecks
+- secrets
+- Docker socket
+- resource limits where relevant
+
+Commit:
+
+security(phase-18): harden container and network runtime
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 19 — ERROR HANDLING & INFORMATION DISCLOSURE
+------------------------------------------------------------
+
+Branch:
+
+security/phase-19-error-handling
+
+Client'a:
+
+- SQL errors
+- stack traces
+- internal IPs
+- filenames
+- secrets
+- service topology
+- panic traces
+
+gitmemeli.
+
+Internal logs gerekli teknik detayı koruyabilir.
+
+Stable error contract oluştur.
+
+Gateway upstream errors'ı da incele.
+
+Commit:
+
+security(phase-19): standardize secure error handling
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 20 — SECURITY AUDIT LOGGING
+------------------------------------------------------------
+
+Branch:
+
+security/phase-20-audit-logging
+
+Security event taxonomy oluştur.
+
+En az:
+
+auth.login.success
+auth.login.failed
+auth.logout
+auth.reset.request
+auth.reset.completed
+auth.session.revoked
+
+authorization.denied
+
+payment.created
+payment.confirmed
+payment.failed
+payment.cancelled
+
+admin.role.changed
+admin.account.blocked
+admin.account.unblocked
+admin.balance.adjusted
+
+security.rate_limit.triggered
+security.invalid_token
+security.validation.rejected
+
+Cross-service correlation için:
+
+request_id
+trace_id
+actor_id
+service
+event
+result
+
+değerlendir.
+
+ASLA loglama:
+
+password
+JWT
+session cookie
+reset token
+API secret
+RabbitMQ password
+private key
+full sensitive PII unnecessarily
+
+Log injection için newline/control character handling'i doğrula.
+
+Commit:
+
+security(phase-20): strengthen security audit telemetry
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 21 — DETECTION & INCIDENT RESPONSE
+------------------------------------------------------------
+
+Branch:
+
+security/phase-21-detection-response
+
+Mevcut:
+
+Prometheus
+Grafana
+Jaeger
+logs
+runbooks
+
+üzerine detection yaklaşımı kur.
+
+Örnek:
+
+Repeated login failures
+→ telemetry
+→ rule
+→ alert
+→ investigation
+→ containment
+
+Repeated 403 object probes
+→ possible BOLA enumeration
+
+Password reset spikes
+→ account attack
+
+RabbitMQ backlog
+→ delivery/security reliability issue
+
+Unexpected cross-service failures
+→ service trust anomaly
+
+Runbooks güncelle.
+
+Commit:
+
+security(phase-21): add security detection and response runbooks
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 22 — DEVSECOPS & SOFTWARE SUPPLY CHAIN
+------------------------------------------------------------
+
+Branch:
+
+security/phase-22-devsecops
+
+Mevcut GitHub workflows'u tekrar keşfet.
+
+Kontrol:
+
+Backend:
+go test
+go vet
+golangci-lint
+govulncheck
+
+Frontend:
+eslint
+type-check
+build
+dependency audit
+
+Security:
+CodeQL
+Semgrep if justified
+Gitleaks
+Trivy
+dependency scanning
+container scanning
+IaC scanning
+SBOM
+
+GitHub Actions:
+
+- pinning
+- least permissions
+- pull_request security
+- untrusted fork behavior
+- secret exposure
+- artifact integrity
+
+Scanner finding = confirmed vulnerability değildir.
+
+Commit:
+
+security(phase-22): strengthen devsecops security gates
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 23 — DYNAMIC WEB/API SECURITY REGRESSION
+------------------------------------------------------------
+
+Branch:
+
+security/phase-23-security-regression
+
+Mevcut security-smoke testlerini incele.
+
+Genişlet:
+
+Input/XSS:
+- HTML form payloads
+- direct API bypass payloads
+- stored XSS candidates
+
+Authorization:
+- BOLA
+- BFLA
+- cross-account
+
+Authentication:
+- invalid token
+- expired token
+- revoked token
+
+CSRF:
+- missing origin/control
+- malformed origin
+
+Rate limiting
+
+Information disclosure
+
+Business logic
+
+Event processing malformed payload tests
+
+Testler destructive olmamalı.
+
+Commit:
+
+security(phase-23): expand end to end security regression
+
+PUSH ET ve DUR.
+
+------------------------------------------------------------
+PHASE 24 — FINAL THREAT MODEL & SECURITY DOCUMENTATION
+------------------------------------------------------------
+
+Branch:
+
+security/phase-24-final-review
+
+Tüm güncel mimariyi tekrar değerlendir.
+
+Threat model:
+
+Actor
+→ Entry Point
+→ Technique
+→ Asset
+→ Impact
+→ Prevention
+→ Detection
+→ Response
+
+STRIDE / OWASP / API Security / MITRE yaklaşımını
+gerektiği yerde kullan.
+
+Dokümanları current code ile uyumlu hale getir.
+
+Eski pentest raporlarını current-state proof kabul etme.
+
+Final classification:
+
+P0
+P1
+P2
+P3
+
+Kalan production gaps açıkça yazılmalı.
+
+Commit:
+
+security(phase-24): complete final security review and documentation
+
+PUSH ET ve DUR.
+
+============================================================
+HER SECURITY FIX İÇİN ZORUNLU ANALİZ
+============================================================
+
+Kod değiştirmeden önce:
+
+### Security Problem
+
+### Current Implementation
+
+### Trust Boundary
+
+### Evidence
+
+### Root Cause
+
+### Attack Scenario
+
+### Impact
+
+### Existing Controls
+
+### Proposed Change
+
+### Files Expected To Change
+
+### Compatibility Risk
+
+### Tests To Add
+
+### Acceptance Criteria
+
+yaz.
+
+Sonra değişikliği uygula.
+
+============================================================
+TEST KURALI
+============================================================
+
+Bir phase:
+
+"kod yazıldı"
+
+diye tamamlanmış sayılmaz.
+
+Tamamlanma kriteri:
+
+CHANGE
++
+TEST
++
+REGRESSION
++
+DIFF REVIEW
++
+COMMIT
++
+PUSH
+
+olmalıdır.
+
+Backend değiştiyse mümkün olduğu kadar:
+
+go test ./...
+
+ve mevcut project-specific quality commands çalıştır.
+
+Frontend değiştiyse:
+
+yarn lint
+yarn type-check
+yarn build
+
+ve mevcut testleri çalıştır.
+
+Repository farklı command kullanıyorsa package/Makefile/CI'dan
+doğru command'ı keşfet.
+
+Hardcoded command yüzünden projeyi bozma.
+
+============================================================
+DIFF REVIEW — PUSH ÖNCESİ
+============================================================
+
+Push öncesi diff'i kontrol et.
+
+Ara:
+
+- accidental secrets
+- debug logging
+- console.log
+- commented credentials
+- disabled TLS verification
+- TODO security bypass
+- temporary admin access
+- wildcard CORS
+- broad database grants
+- dangerous HTML rendering
+- skipped tests
+- test-only security bypass leaking to production
+- generated files unintentionally changed
+- unrelated formatting changes
+
+Bulursan düzeltmeden push etme.
+
+============================================================
+YENİ CRITICAL / HIGH BULGU
+============================================================
+
+Current phase dışında yeni ciddi issue bulursan:
+
+NEW SECURITY FINDING
+
+Severity:
+Component:
+Evidence:
+Attack Path:
+Impact:
+Current Phase Relation:
+Recommended Phase:
+
+şeklinde raporla.
+
+Scope'u gizlice büyütme.
+
+Ancak Critical bir durum current phase değişikliğinin güvenli devamını
+engelliyorsa STOP et ve bildir.
+
+============================================================
+DOKÜMANTASYON KURALI
+============================================================
+
+Kod değişikliği architecture/security gerçeğini değiştiriyorsa
+ilgili dokümanı aynı phase içinde güncelle.
+
+Özellikle gerekirse:
+
+docs/architecture/
+docs/adr/
+docs/runbooks/
+CYBER_SECURITY.md
+SECURITY.md
+
+Ancak sırf doküman değiştirmek için gereksiz ADR oluşturma.
+
+============================================================
+BAŞLANGIÇ
+============================================================
+
+Şimdi yalnızca:
+
+PHASE 00 — CURRENT ARCHITECTURE & SECURITY BASELINE
+
+üzerinde çalış.
+
+Önce latest main'i incele.
+
+Repository'nin önceki halini varsayma.
+
+Current architecture, executable/service boundaries,
+frontend forms, APIs, message flows, database ownership,
+Docker topology ve security controls'ü yeniden çıkar.
+
+Kod davranışını değiştirme.
+
+Phase 00 test/dokümantasyon çalışmasını tamamla,
+commit et,
+push et,
+raporla
+ve DUR.
 ```
 
 Her aşamada standart akış:
