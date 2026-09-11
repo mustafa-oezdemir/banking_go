@@ -99,7 +99,7 @@ func (gateway *Gateway) Handler() http.Handler {
 
 func isIdentityPath(path string) bool {
 	switch path {
-	case "/register", "/login", "/logout", "/forgot-password", "/reset-password":
+	case "/register", "/login", "/logout", "/change-password", "/forgot-password", "/reset-password":
 		return true
 	}
 	return false

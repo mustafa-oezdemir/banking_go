@@ -60,23 +60,28 @@ func (client *Client) ProvisionCustomer(ctx context.Context, id uuid.UUID, email
 	return nil
 }
 
-// RevokeCustomerSessions synchronizes Identity's session generation change
-// with the Banking authorization boundary after a password reset.
-func (client *Client) RevokeCustomerSessions(ctx context.Context, id uuid.UUID) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/internal/customers/"+id.String()+"/sessions/revoke", http.NoBody)
+// SyncCustomerSessionVersion applies Identity's authoritative session version
+// idempotently at Banking's authorization boundary.
+func (client *Client) SyncCustomerSessionVersion(ctx context.Context, id uuid.UUID, version int64) error {
+	payload, err := json.Marshal(map[string]int64{"session_version": version})
 	if err != nil {
 		return err
 	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, client.baseURL+"/internal/customers/"+id.String()+"/session-version", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Internal-Service-Token", client.token)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 	res, err := client.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("call Banking session revocation: %w", err)
+		return fmt.Errorf("call Banking session synchronization: %w", err)
 	}
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 	if res.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("Banking session revocation returned status %d", res.StatusCode)
+		return fmt.Errorf("Banking session synchronization returned status %d", res.StatusCode)
 	}
 	return nil
 }

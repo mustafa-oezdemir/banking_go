@@ -97,7 +97,7 @@ flowchart LR
 | --- | --- | --- |
 | Parametreli SQL | `backend/postgres/queries/*.sql` | SQL sorguları `$1`, `$2` ve `sqlc.arg(...)` parametreleri kullanır; kullanıcı girdisi SQL metnine birleştirilmez. |
 | Tip güvenli query üretimi | `backend/sqlc.yaml`, `backend/postgres/sqlc/*.go` | sqlc, sorgular için tipli Go metotları üretir. |
-| Sabit manuel sorgular | `backend/internal/platform/database/admin.go`, `backend/internal/platform/database/password_reset.go` | Manuel sorgular da placeholder parametreleriyle çalışır. |
+| Sabit manuel sorgular | `backend/internal/platform/database/admin.go`, `backend/internal/platform/identitystore/store.go` | Manuel sorgular da placeholder parametreleriyle çalışır. |
 | UUID ve enum doğrulaması | `backend/internal/platform/httpapi/handler.go`, `payments_handler.go`, migration dosyaları | Path/body UUID'leri parse edilir; rol, durum, para birimi ve ödeme state'leri DB CHECK constraint'leriyle sınırlandırılır. |
 | Katı JSON | `backend/internal/platform/httpapi/payments_handler.go` | `DisallowUnknownFields`, `UseNumber` ve tek JSON değeri kontrolü type confusion/mass-assignment riskini azaltır. |
 | Request body limiti | `backend/internal/platform/httpapi/security.go`, `backend/cmd/main.go` | API body boyutu 1 MiB ile sınırlandırılır. |
@@ -115,7 +115,8 @@ flowchart LR
 | HS256 imza ve minimum secret | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` | `JWT_SECRET` zorunlu ve en az 32 karakterdir; algoritma uygulama tarafından sabitlenir. |
 | Standart claim'ler ve doğrulama | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/middleware.go` | Identity `iss=pehlione-identity`, `aud=pehlione-banking-api`, `jti`, `iat`, `nbf`, `exp` ve `user_id` üretir; Banking imza, issuer ve audience doğrular. Token ömrü 15 dakikadır. |
 | HttpOnly cookie | `backend/internal/platform/identityapi/handler.go` | Token JavaScript'e açılmaz; `HttpOnly`, `SameSite=Strict`, production HTTPS'te `Secure` kullanılır. |
-| Servis sınırı | `backend/internal/platform/httpapi/security.go`, `backend/internal/platform/identitystore/` | Banking, token subject'inin kendi Customer kaydını kontrol eder ancak Identity session/credential verisini okumaz. Browser logout cookie'yi anında siler; kısa access-token ömrü çalınmış token riskini sınırlar. |
+| Servis sınırı ve replay | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/security.go`, `backend/cmd/auth_boundary_test.go` | Credential endpointleri ve JWT issuance yalnız Identity'dedir. Logout/parola değişimi session generation değerini iptal eder; eski JWT replay edilirken reddedilir. Banking eski auth route'larını kaydetmez. |
+| Auth response/CSRF | `backend/internal/platform/identityapi/handler.go` | Auth yanıtları `no-store` kullanır; cookie-authenticated logout ve parola değişimi özel CSRF header'ı ve Fetch Metadata kontrolü ister. |
 | Client state ayrımı | `frontend/lib/store/authStore.ts` | localStorage yalnız e-posta/UI hydration bilgisi taşır; JWT localStorage'a yazılmaz. Gerçek oturum `/session` ile doğrulanır. |
 | SSE süresi | `backend/internal/platform/httpapi/payments_handler.go`, `backend/internal/payment/events.go` | SSE token süresinde kapanır ve kullanıcı başına bağlantıyı sınırlar. |
 
@@ -132,7 +133,7 @@ flowchart LR
 
 | Kontrol | Dosya | Açıklama |
 | --- | --- | --- |
-| bcrypt hash | `backend/internal/platform/httpapi/handler.go`, `credentials.go` | Parolalar düz metin tutulmaz; bcrypt ile hashlenir. |
+| bcrypt hash | `backend/internal/platform/identityapi/handler.go`, `credentials.go` | Parolalar düz metin tutulmaz; bcrypt ile hashlenir. |
 | Parola politikası | `backend/internal/identity/credentials.go` | Minimum 15 karakter, maksimum 72 byte ve yaygın parola engeli uygulanır. |
 | Enumeration ve timing azaltma | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/password_reset_handler.go` | Bilinen, bilinmeyen ve geçersiz e-posta için aynı `202`/generic mesaj döner. Hesap lookup, entropy, token saklama ve e-posta bounded arka plan işindedir. |
 | Kriptografik reset token | `backend/internal/platform/httpapi/password_reset_handler.go` | 32 random byte token üretilir; veritabanında token'ın hash'i tutulur. |

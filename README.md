@@ -183,7 +183,7 @@ yarn build
 
 | Purpose | Endpoints |
 | --- | --- |
-| Authentication | `POST /register`, `POST /login`, `POST /forgot-password`, `POST /reset-password`, `POST /logout`, `GET /session` |
+| Authentication | `POST /register`, `POST /login`, `POST /logout`, `POST /change-password`, `POST /forgot-password`, `POST /reset-password`, `GET /session` |
 | Customer profile | `GET /profile`, `PATCH /profile` |
 | Accounts | `GET /accounts`, `GET /accounts/{id}`, `GET /accounts/{id}/transactions` |
 | Payee verification | `POST /payees/verify` |

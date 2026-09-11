@@ -37,7 +37,7 @@ const (
 // CustomerProvisioner creates the Banking Customer after a successful identity registration.
 type CustomerProvisioner interface {
 	ProvisionCustomer(context.Context, uuid.UUID, string, string) error
-	RevokeCustomerSessions(context.Context, uuid.UUID) error
+	SyncCustomerSessionVersion(context.Context, uuid.UUID, int64) error
 }
 
 // PasswordResetSender delivers an already-generated password-reset command.
@@ -50,9 +50,12 @@ type Store interface {
 	identity.AuthenticationRepository
 	Register(context.Context, string, string, string) (uuid.UUID, error)
 	Delete(context.Context, uuid.UUID) error
+	FindLoginAccountByID(context.Context, uuid.UUID) (identity.LoginAccount, bool, error)
+	ChangePassword(context.Context, uuid.UUID, string, string) (int64, bool, error)
+	RevokeSessions(context.Context, uuid.UUID) (int64, error)
 	GetByEmail(context.Context, string) (uuid.UUID, string, bool, error)
 	CreatePasswordReset(context.Context, uuid.UUID, []byte, time.Time) error
-	ResetPassword(context.Context, []byte, string, time.Time) (uuid.UUID, error)
+	ResetPassword(context.Context, []byte, string, time.Time) (uuid.UUID, int64, error)
 }
 
 // Handler owns identity HTTP workflows and never queries Banking persistence.
@@ -82,14 +85,22 @@ func (handler *Handler) Routes() http.Handler {
 	router := chi.NewRouter()
 	router.Use(limitRequestBody)
 	router.Use(requireJSON)
+	router.Use(noStore)
 	router.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	router.Post("/register", handler.register)
-	router.Post("/login", handler.login)
-	router.Post("/logout", handler.logout)
+	router.With(newIPRateLimiter(5, time.Minute)).Post("/register", handler.register)
+	router.With(newIPRateLimiter(10, time.Minute)).Post("/login", handler.login)
 	router.With(newIPRateLimiter(30, time.Minute)).Post("/forgot-password", handler.forgotPassword)
 	router.With(newIPRateLimiter(60, time.Minute)).Post("/reset-password", handler.resetPassword)
+	router.Group(func(protected chi.Router) {
+		protected.Use(jwtauth.Verifier(handler.tokens))
+		protected.Use(jwtauth.Authenticator(handler.tokens))
+		protected.Use(handler.requireActiveSession)
+		protected.Use(requireCSRF)
+		protected.With(newIPRateLimiter(10, time.Minute)).Post("/change-password", handler.changePassword)
+		protected.Post("/logout", handler.logout)
+	})
 	return router
 }
 
@@ -164,6 +175,12 @@ func (handler *Handler) login(w http.ResponseWriter, request *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "identity unavailable")
 		return
 	}
+	syncCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+	defer cancel()
+	if err = handler.provisioner.SyncCustomerSessionVersion(syncCtx, authenticated.UserID, authenticated.SessionVersion); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "session synchronization temporarily unavailable")
+		return
+	}
 	token, err := handler.issueToken(authenticated.UserID, authenticated.SessionVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create session")
@@ -174,8 +191,86 @@ func (handler *Handler) login(w http.ResponseWriter, request *http.Request) {
 }
 
 func (handler *Handler) logout(w http.ResponseWriter, request *http.Request) {
+	userID, err := authenticatedUserID(request)
+	if err != nil {
+		clearCookie(w, request)
+		writeError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+	defer cancel()
+	version, err := handler.store.RevokeSessions(ctx, userID)
+	if err != nil {
+		clearCookie(w, request)
+		writeError(w, http.StatusServiceUnavailable, "session revocation temporarily unavailable")
+		return
+	}
+	if err = handler.provisioner.SyncCustomerSessionVersion(ctx, userID, version); err != nil {
+		clearCookie(w, request)
+		writeError(w, http.StatusServiceUnavailable, "session synchronization temporarily unavailable")
+		return
+	}
 	clearCookie(w, request)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logout successful"})
+}
+
+func (handler *Handler) changePassword(w http.ResponseWriter, request *http.Request) {
+	userID, err := authenticatedUserID(request)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+	var input struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err = decode(request, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	account, found, err := handler.store.FindLoginAccountByID(request.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "identity unavailable")
+		return
+	}
+	if !found || !identity.VerifyPassword(account.HashedPassword, input.CurrentPassword) {
+		identity.VerifyDummyPassword(input.CurrentPassword)
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if err = identity.ValidatePassword(input.NewPassword); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if identity.VerifyPassword(account.HashedPassword, input.NewPassword) {
+		writeError(w, http.StatusBadRequest, "new password must be different")
+		return
+	}
+	hash, err := identity.HashPassword(input.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update password")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+	defer cancel()
+	version, changed, err := handler.store.ChangePassword(ctx, userID, account.HashedPassword, hash)
+	if err != nil {
+		clearCookie(w, request)
+		writeError(w, http.StatusServiceUnavailable, "password update temporarily unavailable")
+		return
+	}
+	if !changed {
+		clearCookie(w, request)
+		writeError(w, http.StatusConflict, "credentials changed; sign in again")
+		return
+	}
+	if err = handler.provisioner.SyncCustomerSessionVersion(ctx, userID, version); err != nil {
+		clearCookie(w, request)
+		writeError(w, http.StatusServiceUnavailable, "session synchronization temporarily unavailable")
+		return
+	}
+	clearCookie(w, request)
+	writeJSON(w, http.StatusOK, map[string]string{"message": "password updated; sign in again"})
 }
 
 func (handler *Handler) forgotPassword(w http.ResponseWriter, request *http.Request) {
@@ -249,16 +344,16 @@ func (handler *Handler) resetPassword(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	tokenHash := sha256.Sum256([]byte(input.Token))
-	userID, err := handler.store.ResetPassword(request.Context(), tokenHash[:], hash, time.Now().UTC())
+	userID, version, err := handler.store.ResetPassword(request.Context(), tokenHash[:], hash, time.Now().UTC())
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "reset link is invalid or expired")
 		return
 	}
 	revokeCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
 	defer cancel()
-	if err = handler.provisioner.RevokeCustomerSessions(revokeCtx, userID); err != nil {
-		log.Error().Msg("Banking session revocation failed after password reset")
-		writeError(w, http.StatusServiceUnavailable, "password updated; session revocation is temporarily unavailable")
+	if err = handler.provisioner.SyncCustomerSessionVersion(revokeCtx, userID, version); err != nil {
+		log.Error().Msg("Banking session synchronization failed after password reset")
+		writeError(w, http.StatusServiceUnavailable, "password updated; session synchronization is temporarily unavailable")
 		return
 	}
 	clearCookie(w, request)
@@ -268,6 +363,59 @@ func (handler *Handler) resetPassword(w http.ResponseWriter, request *http.Reque
 func (handler *Handler) issueToken(userID uuid.UUID, version int64) (string, error) {
 	_, token, err := handler.tokens.Encode(map[string]any{"user_id": userID.String(), "session_version": version, "iss": issuer, "aud": audience, "jti": uuid.NewString(), "iat": time.Now().Unix(), "nbf": time.Now().Add(-time.Minute).Unix(), "exp": time.Now().Add(sessionLifetime).Unix()})
 	return token, err
+}
+
+func (handler *Handler) requireActiveSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		userID, err := authenticatedUserID(request)
+		if err != nil {
+			clearCookie(w, request)
+			writeError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
+		version, err := sessionVersion(request)
+		if err != nil {
+			clearCookie(w, request)
+			writeError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
+		current, err := handler.store.SessionVersion(request.Context(), userID)
+		if err != nil || current != version {
+			clearCookie(w, request)
+			writeError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
+		next.ServeHTTP(w, request)
+	})
+}
+
+func authenticatedUserID(request *http.Request) (uuid.UUID, error) {
+	_, claims, err := jwtauth.FromContext(request.Context())
+	if err != nil {
+		return uuid.Nil, err
+	}
+	raw, ok := claims["user_id"].(string)
+	if !ok {
+		return uuid.Nil, errors.New("user_id claim missing")
+	}
+	return uuid.Parse(raw)
+}
+
+func sessionVersion(request *http.Request) (int64, error) {
+	_, claims, err := jwtauth.FromContext(request.Context())
+	if err != nil {
+		return 0, err
+	}
+	switch value := claims["session_version"].(type) {
+	case float64:
+		return int64(value), nil
+	case int64:
+		return value, nil
+	case json.Number:
+		return value.Int64()
+	default:
+		return 0, errors.New("session_version claim missing")
+	}
 }
 
 func accepted() map[string]string {
@@ -308,6 +456,27 @@ func requireJSON(next http.Handler) http.Handler {
 				writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 				return
 			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+func noStore(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		next.ServeHTTP(w, r)
+	})
+}
+func requireCSRF(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+		if fetchSite == "cross-site" || fetchSite == "same-site" || r.Header.Get("X-CSRF-Protection") != "1" {
+			writeError(w, http.StatusForbidden, "cross-site request blocked")
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

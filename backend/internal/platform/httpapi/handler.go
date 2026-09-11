@@ -16,7 +16,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
-	"github.com/mustafa-oezdemir/banking_go/internal/identity"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
@@ -26,14 +25,11 @@ import (
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger         *ledger.Service
-	payments       *payment.Service
-	profiles       *account.ProfileService
-	authenticator  *identity.AuthenticationService
-	store          *db.Store
-	notifier       notification.Sender
-	passwordResets passwordResetStore
-	dispatchReset  passwordResetDispatcher
+	ledger   *ledger.Service
+	payments *payment.Service
+	profiles *account.ProfileService
+	store    *db.Store
+	notifier notification.Sender
 }
 
 func validateAccountName(rawName string) (string, error) {
@@ -68,8 +64,7 @@ func parseQueryInt32(raw string) (int32, error) {
 func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 	return &Handler{
 		ledger: ledgerService, payments: payment.NewService(store, nil), profiles: account.NewProfileService(store),
-		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)), store: store,
-		notifier: notification.NoopSender{}, passwordResets: store, dispatchReset: dispatchPasswordReset,
+		store: store, notifier: notification.NoopSender{},
 	}
 }
 
@@ -78,8 +73,7 @@ func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payment.Service, store *db.Store) *Handler {
 	return &Handler{
 		ledger: ledgerService, payments: paymentService, profiles: account.NewProfileService(store),
-		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)),
-		store:         store, notifier: notification.NoopSender{}, passwordResets: store, dispatchReset: dispatchPasswordReset,
+		store: store, notifier: notification.NoopSender{},
 	}
 }
 
@@ -94,142 +88,6 @@ func (h *Handler) notifyActivity(ctx context.Context, activity notification.Acti
 	if err := h.notifier.NotifyActivity(ctx, activity); err != nil {
 		log.Warn().Err(err).Str("kind", activity.Kind).Msg("Post-commit notification failed")
 	}
-}
-
-// Register godoc
-// @Summary      Register a new user
-// @Description  Creates a user, a default EUR account, and a fictional 500 EUR opening balance; returns user details and a JWT token
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        body    body      object{email=string,password=string}  true  "User registration details"
-// @Success      201     {object}  RegisterResponse
-// @Failure      400     {object}  ErrorResponse
-// @Failure      409     {object}  ErrorResponse
-// @Failure      500     {object}  ErrorResponse
-// @Router       /register [post]
-func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	// Step 1: Decode registration payload.
-	var input struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		FullName string `json:"full_name"`
-	}
-	if err := decodeStrictJSON(r, &input); err != nil {
-		log.Warn().Err(err).Msg("Failed to decode register request")
-		respondError(w, http.StatusBadRequest, "invalid input")
-		return
-	}
-
-	email, validationErr := identity.NormalizeEmail(input.Email)
-	if validationErr != nil {
-		respondError(w, http.StatusBadRequest, validationErr.Error())
-		return
-	}
-	if validationErr = identity.ValidatePassword(input.Password); validationErr != nil {
-		respondError(w, http.StatusBadRequest, validationErr.Error())
-		return
-	}
-	fullName, validationErr := identity.NormalizeFullName(defaultFullName(input.FullName, email))
-	if validationErr != nil {
-		respondError(w, http.StatusBadRequest, validationErr.Error())
-		return
-	}
-
-	// Step 2: Hash password before persisting user credentials.
-	hashed, err := identity.HashPassword(input.Password)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to hash password")
-		respondError(w, http.StatusInternalServerError, "failed to hash password")
-		return
-	}
-
-	// Step 3: Atomically persist the user, their EUR account, and the balanced signup credit.
-	customer, err := h.ledger.CreateFundedCustomer(r.Context(), ledger.NewCustomer{
-		Email:          email,
-		HashedPassword: hashed,
-		FullName:       fullName,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create user")
-		respondError(w, http.StatusConflict, "user already exists or failed")
-		return
-	}
-
-	token, err := GenerateToken(customer.User.ID)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to generate token")
-		respondError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-	SetSessionCookie(w, r, token)
-	h.notifyActivity(r.Context(), notification.Activity{
-		UserID: customer.User.ID, AccountID: customer.Account.ID, Kind: "REGISTRATION_CREDIT",
-		Direction: "CREDIT", Amount: signupOpeningBalance, Currency: "EUR", Reference: "Startguthaben",
-	})
-
-	log.Info().Msg("User registered successfully")
-	respondJSON(w, http.StatusCreated, RegisterResponse{
-		UserID:     customer.User.ID.String(),
-		Email:      customer.User.Email,
-		AccountID:  customer.Account.ID.String(),
-		MaskedIBAN: account.MaskIBAN(customer.Account.IBAN),
-	})
-}
-
-// Login godoc
-// @Summary      Login user
-// @Description  Authenticates user with email/password and returns JWT token
-// @Tags         auth
-// @Accept       json
-// @Produce      json
-// @Param        body    body      object{email=string,password=string}  true  "User login details"
-// @Success      200     {object}  MessageResponse
-// @Failure      400     {object}  ErrorResponse
-// @Failure      401     {object}  ErrorResponse
-// @Failure      500     {object}  ErrorResponse
-// @Router       /login [post]
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	// Step 1: Decode login payload.
-	var input struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := decodeStrictJSON(r, &input); err != nil {
-		log.Warn().Err(err).Msg("Failed to decode login request")
-		respondError(w, http.StatusBadRequest, "invalid input")
-		return
-	}
-	authenticated, err := h.authenticator.Authenticate(r.Context(), input.Email, input.Password)
-	if errors.Is(err, identity.ErrInvalidCredentials) {
-		log.Warn().Msg("Login failed - invalid credentials")
-		respondError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-	if err != nil {
-		log.Error().Err(err).Msg("Login failed - identity repository unavailable")
-		respondError(w, http.StatusInternalServerError, "failed to create session")
-		return
-	}
-
-	// Step 2: Return a fresh JWT on successful authentication.
-	token, err := GenerateTokenForVersion(authenticated.UserID, authenticated.SessionVersion)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to generate token")
-		respondError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-	SetSessionCookie(w, r, token)
-
-	log.Info().Msg("User logged in successfully")
-	respondJSON(w, http.StatusOK, MessageResponse{Message: "Login successful"})
-}
-
-// Logout revokes the authenticated token generation and clears the browser cookie.
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	revokeAuthenticatedSession(h.store, r)
-	ClearSessionCookie(w, r)
-	respondJSON(w, http.StatusOK, MessageResponse{Message: "Logout successful"})
 }
 
 // Session returns the identity of a valid authenticated session.

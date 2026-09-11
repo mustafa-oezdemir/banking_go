@@ -11,7 +11,7 @@ import (
 
 func TestGatewayRoutesIdentityAndBanking(t *testing.T) {
 	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/login", r.URL.Path)
+		assert.Contains(t, []string{"/login", "/change-password"}, r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer identity.Close()
@@ -27,6 +27,9 @@ func TestGatewayRoutesIdentityAndBanking(t *testing.T) {
 	gate.Handler().ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/login", nil))
 	assert.Equal(t, http.StatusNoContent, login.Code)
 	assert.NotEmpty(t, login.Header().Get("X-Request-ID"))
+	changePassword := httptest.NewRecorder()
+	gate.Handler().ServeHTTP(changePassword, httptest.NewRequest(http.MethodPost, "/change-password", nil))
+	assert.Equal(t, http.StatusNoContent, changePassword.Code)
 	accounts := httptest.NewRecorder()
 	accountsRequest := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	accountsRequest.Header.Set("X-Internal-Service-Token", "untrusted-browser-value")

@@ -37,11 +37,12 @@ func TestPasswordResetTokenRotationAndSingleUse(t *testing.T) {
 	require.NoError(t, store.CreatePasswordReset(ctx, userID, first[:], now.Add(15*time.Minute)))
 	require.NoError(t, store.CreatePasswordReset(ctx, userID, second[:], now.Add(15*time.Minute)))
 
-	_, err = store.ResetPassword(ctx, first[:], "replacement", now)
+	_, _, err = store.ResetPassword(ctx, first[:], "replacement", now)
 	assert.True(t, errors.Is(err, sql.ErrNoRows), "issuing a new token must invalidate the old token")
-	resetUserID, err := store.ResetPassword(ctx, second[:], "replacement", now)
+	resetUserID, version, err := store.ResetPassword(ctx, second[:], "replacement", now)
 	require.NoError(t, err)
 	assert.Equal(t, userID, resetUserID)
-	_, err = store.ResetPassword(ctx, second[:], "replacement", now)
+	assert.Equal(t, int64(1), version)
+	_, _, err = store.ResetPassword(ctx, second[:], "replacement", now)
 	assert.True(t, errors.Is(err, sql.ErrNoRows), "a reset token must be single use")
 }

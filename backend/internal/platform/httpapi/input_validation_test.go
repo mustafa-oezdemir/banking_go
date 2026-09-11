@@ -18,8 +18,7 @@ import (
 func TestCreatePaymentRejectsMarkupWhenFrontendIsBypassed(t *testing.T) {
 	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
 	userID := uuid.New()
-	token, err := GenerateTokenForVersion(userID, 0)
-	require.NoError(t, err)
+	token := issueBankingTestToken(t, userID, 0)
 	handler := &Handler{payments: payment.NewService(nil, nil)}
 	router := chi.NewRouter()
 	router.Use(jwtauth.Verifier(TokenAuth))

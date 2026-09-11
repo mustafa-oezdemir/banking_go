@@ -151,7 +151,9 @@ The Banking-side Notification client remains for password reset. Payment writes 
 
 | Executable | Source | Responsibility |
 | --- | --- | --- |
-| HTTP API | `backend/cmd/main.go` | Loads environment, connects to PostgreSQL, constructs services, seeds optional demo/admin data, registers Chi routes, starts the in-process scheduler, and serves HTTP. |
+| Banking API | `backend/cmd/main.go` | Serves financial, profile, session-view, and administration APIs; verifies but never issues Identity JWTs. |
+| Identity service | `backend/cmd/identity-service/main.go` | Owns registration, login, logout, password change/reset, JWT issuance, cookies, and credential persistence. |
+| Gateway | `backend/cmd/gateway/main.go` | Routes credential paths exclusively to Identity and other public API paths to Banking. |
 | Notification service | `backend/cmd/notification-service/main.go` | Loads provider, RabbitMQ, and Notification inbox configuration; consumes payment events idempotently, exposes health/private reset routes, and delivers through SMTP or Resend. |
 | Payment worker | `backend/cmd/worker/main.go` | Connects to the same PostgreSQL schema and calls `payment.Service.RunDuePayments` every 15 seconds. |
 | Linux development binaries | `backend/Magefile.go` | Builds the Banking API and standalone Notification linux/amd64 binaries. |
@@ -162,7 +164,7 @@ The backend image additionally embeds `golang-migrate`, migrations, the API bina
 
 | Capability | Main routes | Current implementation |
 | --- | --- | --- |
-| Identity/session | `/register`, `/login`, `/logout`, `/session`, `/forgot-password`, `/reset-password` | Authentication application service and port plus HTTP/database adapters; reset/session middleware remains adapter-orchestrated |
+| Identity/session | `/register`, `/login`, `/logout`, `/change-password`, `/forgot-password`, `/reset-password`, `/session` | Identity owns credentials, JWT issuance and revocation; Banking only serves the authorized session projection. |
 | Customer profile | `GET/PATCH /profile` | `account.ProfileService` and repository port plus HTTP/database adapters |
 | Accounts | `/accounts`, `/accounts/{id}` | Handler-owned orchestration plus sqlc/store access |
 | Ledger views | `/accounts/{id}/entries`, `/transactions/{id}`, `/accounts/{id}/reconcile` | Handler + ledger service + store |
@@ -214,7 +216,7 @@ The database enforces entry shape, status vocabularies, unique IBANs, and append
 
 | Operation | Atomic unit |
 | --- | --- |
-| Registration | User, default account, opening debit/credit entries, and both cached balances |
+| Registration | Identity row is committed first; Banking customer/account/initial ledger provisioning is atomic and Identity compensates its row if provisioning fails. |
 | Deposit/withdraw | Both ledger legs and both affected balances |
 | Own-account transfer | Both ledger legs and both account balances |
 | Immediate payment confirmation | State transition, booking entries, balances, final payment state, and payment audit event |
@@ -243,12 +245,12 @@ Notification delivery is post-commit by design and never participates in a finan
 - Passwords use bcrypt and registration enforces a 15-to-72-byte policy.
 - HS256 JWTs contain issuer, audience, user ID, JTI, issue/not-before/expiry times, and a server-side `session_version`.
 - Browser tokens are stored in an HttpOnly, SameSite=Strict cookie; JavaScript stores only the display email.
-- Logout and password reset increment the persisted session version, invalidating older tokens.
+- Logout, password change, and password reset increment the persisted Identity session version and synchronize Banking's exact-version projection, invalidating older tokens without retry drift.
 - Protected routes authenticate the JWT and compare its session version with PostgreSQL.
 - Ownership checks exist in handlers, queries, or services depending on the flow.
 - Administrator authorization re-reads the role from PostgreSQL rather than trusting a role claim.
 
-Credential normalization, password policy, hashing, verification, and login orchestration live in `internal/identity` without HTTP or PostgreSQL dependencies. `AuthenticationService` uses a narrow repository port and returns only the identity and session generation required for token issuance. JWT/cookie issuance, active-session middleware, role lookup, and reset-token transport remain adapter responsibilities.
+Credential normalization, password policy, hashing, verification, and login orchestration live in `internal/identity` without HTTP or PostgreSQL dependencies. `AuthenticationService` uses a narrow repository port and returns only the identity and session generation required for token issuance. Identity's adapter owns JWT/cookie issuance and credential lifecycle. Banking has no credential route or token-issuance implementation; a static boundary test guards this rule. Administrator authorization re-reads the current role so role changes do not create cross-service session-version drift.
 
 ## Notifications and live updates
 

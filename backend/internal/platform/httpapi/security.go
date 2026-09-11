@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-chi/jwtauth/v5"
-	"github.com/google/uuid"
 
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 )
@@ -80,23 +79,6 @@ func tokenExpiry(r *http.Request) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(seconds, 0), nil
-}
-
-func revokeAuthenticatedSession(store *db.Store, r *http.Request) {
-	_, claims, err := jwtauth.FromContext(r.Context())
-	if err != nil {
-		return
-	}
-	raw, ok := claims["user_id"].(string)
-	if !ok {
-		return
-	}
-	userID, err := uuid.Parse(raw)
-	if err == nil {
-		if revokeErr := store.RevokeUserSessions(r.Context(), userID); revokeErr != nil {
-			return
-		}
-	}
 }
 
 const csrfHeaderName = "X-CSRF-Protection"

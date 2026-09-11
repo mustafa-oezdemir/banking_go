@@ -29,6 +29,17 @@ func (store *Store) FindLoginAccount(ctx context.Context, email string) (identit
 	return account, err == nil, err
 }
 
+// FindLoginAccountByID returns credentials only for an authenticated password-change flow.
+func (store *Store) FindLoginAccountByID(ctx context.Context, userID uuid.UUID) (identity.LoginAccount, bool, error) {
+	var account identity.LoginAccount
+	err := store.db.QueryRowContext(ctx, `SELECT id, email, hashed_password FROM identity.users WHERE id = $1`, userID).
+		Scan(&account.ID, &account.Email, &account.HashedPassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		return identity.LoginAccount{}, false, nil
+	}
+	return account, err == nil, err
+}
+
 // SessionVersion implements identity.AuthenticationRepository.
 func (store *Store) SessionVersion(ctx context.Context, userID uuid.UUID) (int64, error) {
 	var version int64
@@ -79,31 +90,47 @@ func (store *Store) CreatePasswordReset(ctx context.Context, userID uuid.UUID, t
 
 // ResetPassword atomically consumes a valid reset token and increments the
 // Identity session generation.
-func (store *Store) ResetPassword(ctx context.Context, tokenHash []byte, passwordHash string, now time.Time) (uuid.UUID, error) {
+func (store *Store) ResetPassword(ctx context.Context, tokenHash []byte, passwordHash string, now time.Time) (uuid.UUID, int64, error) {
 	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // Commit below wins on success.
 	var userID uuid.UUID
 	err = tx.QueryRowContext(ctx, `DELETE FROM identity.password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2 RETURNING user_id`, tokenHash, now).Scan(&userID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, 0, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE identity.users SET hashed_password = $1, session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, passwordHash, userID); err != nil {
-		return uuid.Nil, err
+	var version int64
+	if err = tx.QueryRowContext(ctx, `UPDATE identity.users SET hashed_password = $1, session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING session_version`, passwordHash, userID).Scan(&version); err != nil {
+		return uuid.Nil, 0, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE identity.password_reset_tokens SET used_at = $2 WHERE user_id = $1 AND used_at IS NULL`, userID, now); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, 0, err
 	}
 	if err = tx.Commit(); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, 0, err
 	}
-	return userID, nil
+	return userID, version, nil
 }
 
 // RevokeSessions advances the Identity-side session generation.
-func (store *Store) RevokeSessions(ctx context.Context, userID uuid.UUID) error {
-	_, err := store.db.ExecContext(ctx, `UPDATE identity.users SET session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, userID)
-	return err
+func (store *Store) RevokeSessions(ctx context.Context, userID uuid.UUID) (int64, error) {
+	var version int64
+	err := store.db.QueryRowContext(ctx, `UPDATE identity.users SET session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING session_version`, userID).Scan(&version)
+	return version, err
+}
+
+// ChangePassword atomically replaces the expected hash and revokes all Identity sessions.
+func (store *Store) ChangePassword(ctx context.Context, userID uuid.UUID, expectedHash, passwordHash string) (int64, bool, error) {
+	var version int64
+	err := store.db.QueryRowContext(ctx, `
+		UPDATE identity.users
+		SET hashed_password = $3, session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1 AND hashed_password = $2
+		RETURNING session_version`, userID, expectedHash, passwordHash).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	return version, err == nil, err
 }

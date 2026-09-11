@@ -132,17 +132,6 @@ definitions:
       message:
         type: string
     type: object
-  api.RegisterResponse:
-    properties:
-      account_id:
-        type: string
-      email:
-        type: string
-      masked_iban:
-        type: string
-      user_id:
-        type: string
-    type: object
   api.StandingOrderRequest:
     properties:
       amount:
@@ -249,7 +238,7 @@ definitions:
       postal_code:
         type: string
     type: object
-  service.VoPResult:
+  payment.VoPResult:
     properties:
       demo_notice:
         type: string
@@ -705,45 +694,6 @@ paths:
       summary: Stream payment events over SSE
       tags:
       - events
-  /login:
-    post:
-      consumes:
-      - application/json
-      description: Authenticates user with email/password and returns JWT token
-      parameters:
-      - description: User login details
-        in: body
-        name: body
-        required: true
-        schema:
-          properties:
-            email:
-              type: string
-            password:
-              type: string
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/api.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: Login user
-      tags:
-      - auth
   /payees/verify:
     post:
       consumes:
@@ -763,7 +713,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/service.VoPResult'
+            $ref: '#/definitions/payment.VoPResult'
         "400":
           description: Bad Request
           schema:
@@ -954,46 +904,6 @@ paths:
       summary: Update the authenticated customer's profile
       tags:
       - profile
-  /register:
-    post:
-      consumes:
-      - application/json
-      description: Creates a user, a default EUR account, and a fictional 500 EUR
-        opening balance; returns user details and a JWT token
-      parameters:
-      - description: User registration details
-        in: body
-        name: body
-        required: true
-        schema:
-          properties:
-            email:
-              type: string
-            password:
-              type: string
-          type: object
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/api.RegisterResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: Register a new user
-      tags:
-      - auth
   /standing-orders:
     get:
       produces:

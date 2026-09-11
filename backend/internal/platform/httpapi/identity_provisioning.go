@@ -56,9 +56,9 @@ func (h *Handler) ProvisionCustomerInternal(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusCreated)
 }
 
-// RevokeCustomerSessionsInternal applies an Identity-owned credential change
-// to Banking's local session generation without exposing Banking persistence.
-func (h *Handler) RevokeCustomerSessionsInternal(w http.ResponseWriter, r *http.Request) {
+// SyncCustomerSessionVersionInternal applies the authoritative Identity session
+// generation idempotently, preventing retry-induced version drift.
+func (h *Handler) SyncCustomerSessionVersionInternal(w http.ResponseWriter, r *http.Request) {
 	if !validInternalServiceToken(r) {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -68,7 +68,14 @@ func (h *Handler) RevokeCustomerSessionsInternal(w http.ResponseWriter, r *http.
 		respondError(w, http.StatusBadRequest, "invalid customer id")
 		return
 	}
-	if err = h.store.RevokeUserSessions(r.Context(), userID); err != nil {
+	var input struct {
+		SessionVersion int64 `json:"session_version"`
+	}
+	if err = decodeStrictJSON(r, &input); err != nil || input.SessionVersion < 0 {
+		respondError(w, http.StatusBadRequest, "invalid session version")
+		return
+	}
+	if err = h.store.SetUserSessionVersion(r.Context(), userID, input.SessionVersion); err != nil {
 		respondError(w, http.StatusNotFound, "customer not found")
 		return
 	}

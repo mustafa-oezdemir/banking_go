@@ -344,15 +344,6 @@ func main() {
 		})
 	})
 
-	// Public routes
-	authRateLimit := api.NewIPRateLimiter(10, time.Minute)
-	r.With(authRateLimit).Post("/register", h.Register)
-	r.With(authRateLimit).Post("/login", h.Login)
-	passwordResetRequestLimit := api.NewIPRateLimiter(5, time.Hour)
-	passwordResetConfirmLimit := api.NewIPRateLimiter(10, time.Hour)
-	r.With(passwordResetRequestLimit).Post("/forgot-password", h.ForgotPassword)
-	r.With(passwordResetConfirmLimit).Post("/reset-password", h.ResetPassword)
-	r.With(jwtauth.Verifier(api.TokenAuth)).Post("/logout", h.Logout)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		// Health returns service liveness plus lightweight runtime metadata.
 		zlog.Info().Msg("Health check requested")
@@ -381,7 +372,7 @@ func main() {
 	// Only the Identity service can provision a Banking Customer. This route is
 	// private in Compose and protected by an independent service token.
 	r.Post("/internal/customers/provision", h.ProvisionCustomerInternal)
-	r.Post("/internal/customers/{id}/sessions/revoke", h.RevokeCustomerSessionsInternal)
+	r.Put("/internal/customers/{id}/session-version", h.SyncCustomerSessionVersionInternal)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),

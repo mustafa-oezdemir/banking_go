@@ -14,8 +14,9 @@ of concept. Test only systems you own or are explicitly authorized to assess.
 
 ## Security Model
 
-- Authentication uses signed, two-hour JWT sessions in `HttpOnly`,
-  `SameSite=Strict` cookies. Production cookies are also `Secure`.
+- Identity issues signed, 15-minute JWT sessions in `HttpOnly`,
+  `SameSite=Strict` cookies. HTTPS cookies are also `Secure`; logout and
+  credential changes revoke the server-side session generation.
 - Unsafe cookie-authenticated requests require `X-CSRF-Protection: 1` and pass
   Fetch Metadata and Origin checks.
 - Every account read and mutation verifies ownership. System accounts cannot be

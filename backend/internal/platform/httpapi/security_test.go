@@ -34,6 +34,18 @@ func TestSecurityHeaders(t *testing.T) {
 	assert.Contains(t, rw.Header().Get("Strict-Transport-Security"), "max-age=31536000")
 }
 
+func issueBankingTestToken(t *testing.T, userID uuid.UUID, version int64) string {
+	t.Helper()
+	_, token, err := TokenAuth.Encode(map[string]any{
+		"user_id": userID.String(), "session_version": version,
+		"iss": tokenIssuer, "aud": tokenAudience, "jti": uuid.NewString(),
+		"iat": time.Now().Unix(), "nbf": time.Now().Add(-time.Minute).Unix(),
+		"exp": time.Now().Add(15 * time.Minute).Unix(),
+	})
+	require.NoError(t, err)
+	return token
+}
+
 func TestIPRateLimiter(t *testing.T) {
 	t.Setenv("RENDER", "false")
 	t.Setenv("TRUST_PROXY_HEADERS", "false")
@@ -140,8 +152,7 @@ func TestRequireActiveSessionRejectsUnknownBankingSubject(t *testing.T) {
 		Email: "session-" + uuid.NewString() + "@example.com", HashedPassword: "test-only", FullName: "Session Test",
 	})
 	require.NoError(t, err)
-	token, err := GenerateTokenForVersion(user.ID, 0)
-	require.NoError(t, err)
+	token := issueBankingTestToken(t, user.ID, 0)
 
 	router := chi.NewRouter()
 	router.Use(jwtauth.Verifier(TokenAuth))
@@ -157,10 +168,9 @@ func TestRequireActiveSessionRejectsUnknownBankingSubject(t *testing.T) {
 		return response
 	}
 	require.Equal(t, http.StatusNoContent, request().Code)
-	require.NoError(t, h.store.RevokeUserSessions(t.Context(), user.ID))
+	require.NoError(t, h.store.SetUserSessionVersion(t.Context(), user.ID, 1))
 	require.Equal(t, http.StatusUnauthorized, request().Code, "a token issued before reset must be rejected")
-	unknownToken, err := GenerateTokenForVersion(uuid.New(), 0)
-	require.NoError(t, err)
+	unknownToken := issueBankingTestToken(t, uuid.New(), 0)
 	unknownRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	unknownRequest.Header.Set("Authorization", "Bearer "+unknownToken)
 	unknownResponse := httptest.NewRecorder()

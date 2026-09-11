@@ -138,9 +138,9 @@ func (store *Store) GetUserSessionVersion(ctx context.Context, userID uuid.UUID)
 	return version, err
 }
 
-// RevokeUserSessions invalidates every JWT issued for a user before this call.
-func (store *Store) RevokeUserSessions(ctx context.Context, userID uuid.UUID) error {
-	result, err := store.db.ExecContext(ctx, `UPDATE users SET session_version = session_version + 1 WHERE id = $1`, userID)
+// SetUserSessionVersion stores Identity's authoritative session generation.
+func (store *Store) SetUserSessionVersion(ctx context.Context, userID uuid.UUID, version int64) error {
+	result, err := store.db.ExecContext(ctx, `UPDATE users SET session_version = $2 WHERE id = $1`, userID, version)
 	if err != nil {
 		return err
 	}
@@ -154,15 +154,14 @@ func (store *Store) RevokeUserSessions(ctx context.Context, userID uuid.UUID) er
 	return nil
 }
 
-// UpdateUserRole changes a role, revokes existing sessions, and appends a durable audit event atomically.
+// UpdateUserRole changes a role and appends a durable audit event atomically.
 func (store *Store) UpdateUserRole(ctx context.Context, actorID, userID uuid.UUID, role, requestID string) error {
 	return store.ExecTxWithHandle(ctx, func(_ *sqlc.Queries, executor sqlc.DBTX) error {
 		var previous string
 		if err := executor.QueryRowContext(ctx, `SELECT role FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&previous); err != nil {
 			return err
 		}
-		if _, err := executor.ExecContext(ctx, `
-			UPDATE users SET role = $2, session_version = session_version + 1 WHERE id = $1`, userID, role); err != nil {
+		if _, err := executor.ExecContext(ctx, `UPDATE users SET role = $2 WHERE id = $1`, userID, role); err != nil {
 			return err
 		}
 		return insertAdminAudit(ctx, executor, actorID, &userID, nil, "USER_ROLE_UPDATED", previous, role, requestID)

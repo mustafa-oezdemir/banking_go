@@ -48,66 +48,6 @@ func setupTestHandler(t *testing.T) *Handler {
 	return NewHandler(ledgerService, store)
 }
 
-func TestRegisterHandler_BadRequest(t *testing.T) {
-	// Missing request body should trigger 400 validation response.
-	h := setupTestHandler(t)
-	req := httptest.NewRequest(http.MethodPost, "/register", nil)
-	rw := httptest.NewRecorder()
-	h.Register(rw, req)
-	assert.Equal(t, http.StatusBadRequest, rw.Code)
-}
-
-func TestRegisterHandler_Success(t *testing.T) {
-	h := setupTestHandler(t)
-	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
-
-	// Use a unique email per run to avoid DB uniqueness collisions.
-	email := "testuser_" + uuid.New().String() + "@example.com"
-	body := map[string]string{"email": email, "password": "testpassword123"}
-	b, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(b))
-	rw := httptest.NewRecorder()
-
-	h.Register(rw, req)
-	assert.Equal(t, http.StatusCreated, rw.Code)
-	var registerResponse RegisterResponse
-	require.NoError(t, json.NewDecoder(rw.Body).Decode(&registerResponse))
-	user, err := h.store.GetUserByEmail(t.Context(), email)
-	require.NoError(t, err)
-	accounts, err := h.store.ListAccountsByOwner(t.Context(), uuid.NullUUID{UUID: user.ID, Valid: true})
-	require.NoError(t, err)
-	require.Len(t, accounts, 1)
-	assert.Equal(t, "EUR", accounts[0].Currency)
-	assert.Equal(t, "GIROKONTO", accounts[0].AccountType)
-	require.NoError(t, sepa.ValidateIBAN(accounts[0].Iban))
-	assert.Equal(t, accounts[0].ID.String(), registerResponse.AccountID)
-	assert.Equal(t, sepa.MaskIBAN(accounts[0].Iban), registerResponse.MaskedIBAN)
-	assert.Equal(t, "500.0000", accounts[0].Balance)
-	calculatedBalance, err := h.store.GetAccountBalance(t.Context(), accounts[0].ID)
-	require.NoError(t, err)
-	assert.Equal(t, "500.0000", calculatedBalance)
-
-	cookies := rw.Result().Cookies()
-	require.Len(t, cookies, 1)
-	assert.Equal(t, sessionCookieName, cookies[0].Name)
-	assert.True(t, cookies[0].HttpOnly)
-	assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
-}
-
-func TestRegisterHandler_RejectsWeakPassword(t *testing.T) {
-	h := setupTestHandler(t)
-	body := map[string]string{"email": "weak@example.com", "password": "password"}
-	payload, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(payload))
-	rw := httptest.NewRecorder()
-	h.Register(rw, req)
-	assert.Equal(t, http.StatusBadRequest, rw.Code)
-}
-
 func TestAdminOverviewWithActiveSeededSession(t *testing.T) {
 	h := setupTestHandler(t)
 	require.NoError(t, InitTokenAuth("fV7sliKV3qn657I60wEFtw/Auk/0bNU9zdp30wFzfDg="))
@@ -124,8 +64,7 @@ func TestAdminOverviewWithActiveSeededSession(t *testing.T) {
 	require.NoError(t, err)
 	version, err := h.store.GetUserSessionVersion(t.Context(), adminID)
 	require.NoError(t, err)
-	token, err := GenerateTokenForVersion(adminID, version)
-	require.NoError(t, err)
+	token := issueBankingTestToken(t, adminID, version)
 
 	router := chi.NewRouter()
 	router.Use(jwtauth.Verifier(TokenAuth))
@@ -206,9 +145,7 @@ func createTestUserToken(t *testing.T, h *Handler) string {
 	})
 	require.NoError(t, err)
 
-	token, err := GenerateToken(user.ID)
-	require.NoError(t, err)
-	return token
+	return issueBankingTestToken(t, user.ID, 0)
 }
 
 func performJSONRequest(
