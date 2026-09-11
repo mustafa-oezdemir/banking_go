@@ -19,6 +19,7 @@ scripts*
 .local*
 bin*
 *sh
+!docker/postgres/provision-service-roles.sh
 test-results*
 *.log
 .magecache/
