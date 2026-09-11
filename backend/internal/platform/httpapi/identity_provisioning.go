@@ -2,13 +2,13 @@ package api
 
 import (
 	"crypto/subtle"
-	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/mustafa-oezdemir/banking_go/internal/identity"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 )
 
@@ -26,9 +26,7 @@ func (h *Handler) ProvisionCustomerInternal(w http.ResponseWriter, r *http.Reque
 		Email      string `json:"email"`
 		FullName   string `json:"full_name"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -41,7 +39,17 @@ func (h *Handler) ProvisionCustomerInternal(w http.ResponseWriter, r *http.Reque
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_, err = h.ledger.CreateFundedCustomer(r.Context(), ledger.NewCustomer{IdentityID: identifier, Email: strings.TrimSpace(input.Email), FullName: defaultFullName(input.FullName, input.Email), HashedPassword: "identity-managed"})
+	email, err := identity.NormalizeEmail(input.Email)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid email")
+		return
+	}
+	fullName := defaultFullName(input.FullName, email)
+	if fullName, err = identity.NormalizeFullName(fullName); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid full name")
+		return
+	}
+	_, err = h.ledger.CreateFundedCustomer(r.Context(), ledger.NewCustomer{IdentityID: identifier, Email: email, FullName: fullName, HashedPassword: "identity-managed"})
 	if err != nil {
 		respondError(w, http.StatusConflict, "customer provisioning failed")
 		return

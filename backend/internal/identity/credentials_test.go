@@ -29,3 +29,13 @@ func TestValidateRegistrationPassword(t *testing.T) {
 	assert.Error(t, ValidatePassword(strings.Repeat("ü", maxPasswordBytes)))
 	assert.NoError(t, ValidatePassword("correct horse battery staple"))
 }
+
+func TestNormalizeFullNameRejectsMarkupAndControlCharacters(t *testing.T) {
+	name, err := NormalizeFullName("  Helga Müller ")
+	require.NoError(t, err)
+	assert.Equal(t, "Helga Müller", name)
+	for _, invalid := range []string{"<script>alert(1)</script>", "Helga\nMüller"} {
+		_, err = NormalizeFullName(invalid)
+		assert.Error(t, err)
+	}
+}

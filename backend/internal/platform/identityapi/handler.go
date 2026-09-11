@@ -73,6 +73,8 @@ func New(store Store, secret string, provisioner CustomerProvisioner, notifier P
 // Routes returns public Identity endpoints and its independent health check.
 func (handler *Handler) Routes() http.Handler {
 	router := chi.NewRouter()
+	router.Use(limitRequestBody)
+	router.Use(requireJSON)
 	router.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -106,6 +108,10 @@ func (handler *Handler) register(w http.ResponseWriter, request *http.Request) {
 	fullName := strings.TrimSpace(input.FullName)
 	if fullName == "" {
 		fullName = strings.Split(email, "@")[0]
+	}
+	if fullName, err = identity.NormalizeFullName(fullName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	hash, err := identity.HashPassword(input.Password)
 	if err != nil {
@@ -253,6 +259,31 @@ func decode(r *http.Request, target any) error {
 		return err
 	}
 	return nil
+}
+
+func limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const maxBodyBytes int64 = 64 << 10
+		if r.ContentLength > maxBodyBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body is too large")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func requireJSON(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && r.ContentLength != 0 {
+			contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+			if contentType != "application/json" {
+				writeError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})

@@ -63,21 +63,27 @@ type notifierStub struct{}
 
 func (notifierStub) SendPasswordReset(context.Context, string, string, string) error { return nil }
 
+func jsonRequest(method, target, body string) *http.Request {
+	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
 func TestIdentityRegisterLoginAndInvalidCredentials(t *testing.T) {
 	store := &memoryStore{users: map[string]identity.LoginAccount{}}
 	provisioner := &provisionerStub{}
 	handler, err := New(store, identityTestSecret, provisioner, notifierStub{})
 	require.NoError(t, err)
 	register := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(register, httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"email":"ada@example.test","password":"IdentityPhase5!Pass","full_name":"Ada Example"}`)))
+	handler.Routes().ServeHTTP(register, jsonRequest(http.MethodPost, "/register", `{"email":"ada@example.test","password":"IdentityPhase5!Pass","full_name":"Ada Example"}`))
 	require.Equal(t, http.StatusCreated, register.Code)
 	assert.Equal(t, 1, provisioner.calls)
 	require.NotEmpty(t, register.Result().Cookies())
 	invalid := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"ada@example.test","password":"wrong"}`)))
+	handler.Routes().ServeHTTP(invalid, jsonRequest(http.MethodPost, "/login", `{"email":"ada@example.test","password":"wrong"}`))
 	assert.Equal(t, http.StatusUnauthorized, invalid.Code)
 	login := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"email":"ada@example.test","password":"IdentityPhase5!Pass"}`)))
+	handler.Routes().ServeHTTP(login, jsonRequest(http.MethodPost, "/login", `{"email":"ada@example.test","password":"IdentityPhase5!Pass"}`))
 	assert.Equal(t, http.StatusOK, login.Code)
 	assert.Equal(t, sessionCookie, login.Result().Cookies()[0].Name)
 }
@@ -95,4 +101,17 @@ func TestDecodeRejectsUnknownAndTrailingJSON(t *testing.T) {
 			require.Error(t, decode(httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body)), &input))
 		})
 	}
+}
+
+func TestIdentityAPIRejectsNonJSONAndMarkupRegistration(t *testing.T) {
+	handler, err := New(&memoryStore{users: map[string]identity.LoginAccount{}}, identityTestSecret, &provisionerStub{}, notifierStub{})
+	require.NoError(t, err)
+
+	nonJSON := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(nonJSON, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`email=ada@example.test`)))
+	assert.Equal(t, http.StatusUnsupportedMediaType, nonJSON.Code)
+
+	markup := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(markup, jsonRequest(http.MethodPost, "/register", `{"email":"ada@example.test","password":"IdentityPhase5!Pass","full_name":"<script>alert(1)</script>"}`))
+	assert.Equal(t, http.StatusBadRequest, markup.Code)
 }

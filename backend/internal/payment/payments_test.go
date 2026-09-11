@@ -257,3 +257,12 @@ func TestStandingOrderRecurrence(t *testing.T) {
 	order := sqlc.StandingOrder{MaxOccurrences: sql.NullInt32{Int32: maxOccurrences, Valid: true}, OccurrencesCreated: 1}
 	assert.True(t, shouldCompleteStanding(order, start.AddDate(0, 1, 0)))
 }
+
+func TestPaymentValidationRejectsMarkupPayload(t *testing.T) {
+	_, err := validatePaymentInput(CreatePaymentInput{
+		OwnerID: uuid.New(), SourceAccountID: uuid.New(), BeneficiaryName: "<svg/onload=alert(1)>",
+		BeneficiaryIBAN: "DE89370400440532013000", Amount: "1.00", TransferType: PaymentStandard,
+		ScheduleType: ScheduleImmediate, IdempotencyKey: "payment-validation-test",
+	}, time.Now().UTC())
+	assert.ErrorIs(t, err, ErrInvalidPaymentInput)
+}

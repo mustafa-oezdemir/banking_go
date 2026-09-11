@@ -28,3 +28,11 @@ func TestNormalizeProfile(t *testing.T) {
 	assert.Equal(t, "DE", profile.CountryCode)
 	assert.Equal(t, "1980-05-17", birthDate.Format("2006-01-02"))
 }
+
+func TestProfileRejectsMarkupBeforePersistence(t *testing.T) {
+	_, _, err := NormalizeProfile(ProfileInput{
+		FullName: "<img src=x onerror=alert(1)>", Phone: "+49 30 1234567", BirthDate: "1980-05-17",
+		AddressLine1: "Musterstraße 1", PostalCode: "10115", City: "Berlin", CountryCode: "DE",
+	}, time.Date(2026, time.September, 10, 0, 0, 0, 0, time.UTC))
+	assert.Error(t, err)
+}

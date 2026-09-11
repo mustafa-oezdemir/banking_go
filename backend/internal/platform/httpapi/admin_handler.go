@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -116,7 +115,7 @@ func (h *Handler) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Role string `json:"role"`
 	}
-	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err = decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -154,7 +153,7 @@ func (h *Handler) AdminUpdateAccountStatus(w http.ResponseWriter, r *http.Reques
 	var input struct {
 		Status string `json:"status"`
 	}
-	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err = decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -189,7 +188,7 @@ func (h *Handler) AdminAdjustAccountBalance(w http.ResponseWriter, r *http.Reque
 		Operation string `json:"operation"`
 		Amount    string `json:"amount"`
 	}
-	if err = json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err = decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
