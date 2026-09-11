@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
+	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
 )
 
 func TestSeedDemoDataCanRunRepeatedly(t *testing.T) {
@@ -17,6 +18,34 @@ func TestSeedDemoDataCanRunRepeatedly(t *testing.T) {
 
 	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger.Service, payments))
 	require.NoError(t, SeedDemoData(context.Background(), ledger.store, ledger.Service, payments))
+}
+
+func TestEnsureDemoUserReusesAccountOwnedByLegacyEmail(t *testing.T) {
+	ledger := setupTestLedger(t)
+	ctx := context.Background()
+	unique := uuid.NewString()
+	canonicalEmail := "canonical-" + unique + "@example.test"
+	legacyEmail := "legacy-" + unique + "@example.test"
+	legacy, err := ledger.store.CreateUser(ctx, sqlc.CreateUserParams{
+		Email: legacyEmail, HashedPassword: "test-only-hash", FullName: "Legacy Demo",
+	})
+	require.NoError(t, err)
+	accountBase := uint64(uuid.New().ID()) + 4_000_000_000
+	_, err = createSeedAccount(ctx, ledger.store, legacy.ID, "Legacy Demo Girokonto", "GIROKONTO", accountBase)
+	require.NoError(t, err)
+	// Reproduce an interrupted prior startup: the canonical user exists, but
+	// the deterministic demo account still belongs to the legacy identity.
+	_, err = ledger.store.CreateUser(ctx, sqlc.CreateUserParams{
+		Email: canonicalEmail, HashedPassword: "test-only-hash", FullName: "Legacy Demo",
+	})
+	require.NoError(t, err)
+
+	seeded, err := ensureDemoUser(
+		ctx, ledger.store, canonicalEmail, "Legacy Demo", accountBase, "test-only-hash", legacyEmail,
+	)
+	require.NoError(t, err)
+	require.Equal(t, legacy.ID, seeded.user.ID)
+	require.Equal(t, legacy.ID, seeded.current.OwnerID.UUID)
 }
 
 func TestSeedConfiguredAdminIsIndependentFromDemoSeed(t *testing.T) {

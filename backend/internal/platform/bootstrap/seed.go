@@ -40,7 +40,10 @@ func SeedDemoData(ctx context.Context, store *db.Store, ledgerService *ledger.Se
 		return fmt.Errorf("hash demo seed password: %w", err)
 	}
 
-	helga, err := ensureDemoUser(ctx, store, "helga.müller@pehlione.com", "Helga Müller", 3100, demoHash)
+	helga, err := ensureDemoUser(
+		ctx, store, "helga.mueller@pehlione.com", "Helga Müller", 3100, demoHash,
+		"helga.mueller@pehlione.com",
+	)
 	if err != nil {
 		return err
 	}
@@ -208,9 +211,34 @@ func ensureSeedPayment(ctx context.Context, store *db.Store, payments *payment.S
 	return nil
 }
 
-func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string, accountBase uint64, passwordHash string) (demoUser, error) {
-	user, err := store.GetUserByEmail(ctx, email)
-	if err == sql.ErrNoRows {
+func ensureDemoUser(
+	ctx context.Context,
+	store *db.Store,
+	email, fullName string,
+	accountBase uint64,
+	passwordHash string,
+	legacyEmails ...string,
+) (demoUser, error) {
+	user, found, err := findDemoUserByAccount(ctx, store, email, accountBase, legacyEmails...)
+	if err != nil {
+		return demoUser{}, err
+	}
+	if !found {
+		user, err = store.GetUserByEmail(ctx, email)
+	}
+	if !found && err == sql.ErrNoRows {
+		for _, legacyEmail := range legacyEmails {
+			user, err = store.GetUserByEmail(ctx, legacyEmail)
+			if err == nil {
+				found = true
+				break
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return demoUser{}, err
+			}
+		}
+	}
+	if !found && err == sql.ErrNoRows {
 		created, createErr := store.CreateUser(ctx, sqlc.CreateUserParams{Email: email, HashedPassword: passwordHash, FullName: fullName})
 		if createErr != nil {
 			return demoUser{}, createErr
@@ -243,6 +271,49 @@ func ensureDemoUser(ctx context.Context, store *db.Store, email, fullName string
 		result.savings, err = createSeedAccount(ctx, store, user.ID, fullName+" Sparkonto", "SPARKONTO", accountBase+1)
 	}
 	return result, err
+}
+
+// findDemoUserByAccount recognizes data created by older seed versions. The
+// deterministic IBAN is only trusted when its owner has the canonical email or
+// an explicitly listed legacy alias; an unrelated account is never adopted.
+func findDemoUserByAccount(
+	ctx context.Context,
+	store *db.Store,
+	canonicalEmail string,
+	accountBase uint64,
+	legacyEmails ...string,
+) (sqlc.User, bool, error) {
+	allowedEmails := make(map[string]struct{}, len(legacyEmails)+1)
+	allowedEmails[strings.ToLower(strings.TrimSpace(canonicalEmail))] = struct{}{}
+	for _, email := range legacyEmails {
+		allowedEmails[strings.ToLower(strings.TrimSpace(email))] = struct{}{}
+	}
+
+	for _, number := range []uint64{accountBase, accountBase + 1} {
+		iban, err := sepa.GermanDemoIBANForAccount(number)
+		if err != nil {
+			return sqlc.User{}, false, err
+		}
+		account, err := store.GetAccountByIBAN(ctx, iban)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return sqlc.User{}, false, err
+		}
+		if !account.OwnerID.Valid {
+			return sqlc.User{}, false, fmt.Errorf("demo IBAN %s has no owner", iban)
+		}
+		owner, err := store.GetUserByID(ctx, account.OwnerID.UUID)
+		if err != nil {
+			return sqlc.User{}, false, fmt.Errorf("load owner of demo IBAN %s: %w", iban, err)
+		}
+		if _, allowed := allowedEmails[strings.ToLower(strings.TrimSpace(owner.Email))]; !allowed {
+			return sqlc.User{}, false, fmt.Errorf("demo IBAN %s belongs to a non-demo user", iban)
+		}
+		return owner, true, nil
+	}
+	return sqlc.User{}, false, nil
 }
 
 func createSeedAccount(ctx context.Context, store *db.Store, ownerID uuid.UUID, name, accountType string, number uint64) (sqlc.Account, error) {
