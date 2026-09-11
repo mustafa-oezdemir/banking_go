@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Architecture Phase 8 completed
+Status: Architecture Phase 10 completed
 
 Last updated: 2026-09-11
 
@@ -23,8 +23,8 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 | 6. Introduce gateway and service auth | Completed: stable external routing and authenticated internal calls | Gateway |
 | 7. Add distributed observability | Completed: cross-service logs, metrics and traces | Jaeger |
 | 8. Data ownership hardening | Completed: schema-local PostgreSQL runtime roles and ownership fitness tests | Two short-lived control-plane containers |
-| 9. Contract & failure testing | Distributed architecture behavior and failure scenarios | None required |
-| 10. Final architecture review | Decision matrix and final C4 architecture review | No default new service |
+| 9. Contract & failure testing | Completed: distributed fitness functions and failure-path tests | None required |
+| 10. Final architecture review | Completed: retain Banking Core decision matrix and final C4 views | No new Banking service |
 
 ## Phase 0 — Baseline analysis
 
@@ -175,13 +175,25 @@ Delivered:
 - automated architecture and integration checks verify Compose role wiring and effective cross-schema denial;
 - [service-data-ownership.md](service-data-ownership.md) and ADR-012 document the boundaries.
 
-## Phase 9 — Contract & failure testing
+## Phase 9 — Contract & failure testing (completed)
 
-Goal: prove distributed behavior, including recovery and financial-invariant preservation, beyond happy paths.
+Delivered:
 
-## Phase 10 — Final architecture review
+- a versioned set of distributed fitness functions mapping notification, RabbitMQ, outbox, Identity, PostgreSQL, idempotency and malformed-event scenarios to executable tests and manual recovery checks;
+- focused failure-path tests proving a malformed event cannot reach the provider and an Identity outage does not block a Banking route;
+- an explicit balance invariant for every booking, plus existing concurrent scheduled-payment, idempotency and duplicate-consumer tests.
 
-Goal: document the decision to retain Account, Payment and Ledger in Banking unless a specific learning goal justifies distributed financial transactions.
+See [distributed-fitness-functions.md](distributed-fitness-functions.md).
+
+## Phase 10 — Final architecture review (completed)
+
+Delivered:
+
+- ADR-014, which records the decision to retain Account, Payment and Ledger in one Banking Core;
+- a decision matrix with extraction and revisit criteria for Identity, Notification, Account, Payment and Ledger;
+- final C4-style context, container/data ownership, and Banking Core component diagrams.
+
+See [final-service-extraction-decision.md](final-service-extraction-decision.md).
 
 ## Cross-phase safeguards
 
@@ -212,5 +224,7 @@ The following gates apply to every phase:
 | ADR-010 | 6 | API gateway scope and routing |
 | ADR-011 | 7 | Observability stack and sensitive-data policy |
 | ADR-012 | 8 | Enforced service data ownership with PostgreSQL roles |
+| ADR-013 | Observability follow-up | RabbitMQ monitoring with Prometheus and Grafana |
+| ADR-014 | 10 | Retain Account, Payment and Ledger as one Banking Core |
 
 Create an ADR only when the decision is actually made; do not pre-decide technology to fill the sequence.

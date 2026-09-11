@@ -33,3 +33,22 @@ func TestGatewayRoutesIdentityAndBanking(t *testing.T) {
 	gate.Handler().ServeHTTP(accounts, accountsRequest)
 	assert.Equal(t, http.StatusAccepted, accounts.Code)
 }
+
+func TestGatewayIdentityOutageDoesNotBlockBankingRoute(t *testing.T) {
+	banking := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/accounts", r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer banking.Close()
+
+	gate, err := New(Config{IdentityURL: "http://127.0.0.1:1", BankingURL: banking.URL})
+	require.NoError(t, err)
+
+	login := httptest.NewRecorder()
+	gate.Handler().ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/login", nil))
+	assert.Equal(t, http.StatusBadGateway, login.Code)
+
+	accounts := httptest.NewRecorder()
+	gate.Handler().ServeHTTP(accounts, httptest.NewRequest(http.MethodGet, "/accounts", nil))
+	assert.Equal(t, http.StatusNoContent, accounts.Code)
+}

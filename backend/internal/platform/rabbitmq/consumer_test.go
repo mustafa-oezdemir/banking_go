@@ -99,6 +99,18 @@ func TestProcessorReleasesTransientDeliveryFailureForRetry(t *testing.T) {
 	assert.Equal(t, 1, store.released)
 }
 
+func TestProcessorDeadLettersMalformedEventWithoutCallingProvider(t *testing.T) {
+	store := newMemoryEventStore()
+	delivery := &deliveryStub{}
+	processor, err := NewProcessor(store, delivery, time.Second)
+	require.NoError(t, err)
+
+	malformed := paymentEvent(t)
+	malformed.Payload = []byte(`{"recipient_email":"owner@example.test","unexpected":true}`)
+	assert.Equal(t, Dead, processor.Process(context.Background(), malformed))
+	assert.Equal(t, 0, delivery.calls, "a malformed command must never reach the email provider")
+}
+
 func TestRetryHeadersAreBounded(t *testing.T) {
 	headers := retryHeaders(amqp.Table{"x-retry-count": int32(2)})
 	assert.Equal(t, int32(3), headers["x-retry-count"])

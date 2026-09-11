@@ -1,10 +1,10 @@
 # Current Architecture
 
-Status: Architecture Phase 8 with enforced service data ownership
+Status: Architecture Phase 10 completed
 
 Last verified: 2026-09-11
 
-Scope: Phase 4–8 completion state
+Scope: Phase 4–10 completion state
 
 ## Purpose and system boundary
 
@@ -40,6 +40,8 @@ flowchart LR
     Worker["Optional Go payment worker"]
     DB[("PostgreSQL 16\nschema-local runtime roles")]
     Rabbit["RabbitMQ\ndurable event broker"]
+    Prometheus["Prometheus\nbroker metrics"]
+    Grafana["Grafana\noperational dashboards"]
     MailHog["MailHog SMTP/UI"]
     Resend["Resend API"]
 
@@ -56,12 +58,14 @@ flowchart LR
     API -->|"Post-commit outbox publisher"| Rabbit
     Worker -->|"Post-commit outbox publisher"| Rabbit
     Rabbit -->|"payment.*.v1"| Notification
+    Prometheus -->|"aggregate + filtered queue metrics"| Rabbit
+    Grafana --> Prometheus
     Notification -->|"SMTP"| MailHog
     Notification -. "HTTPS" .-> Resend
     API -->|"SSE refresh signals"| Browser
 ```
 
-Docker Compose starts `postgres`, a short-lived `db-role-provisioner`, a short-lived `migrations` service, `rabbitmq`, `jaeger`, `mailhog`, `notification-service`, `identity-service`, `banking-api`, `gateway`, and `frontend`. Only Gateway is the browser-facing backend entry point; Notification remains internal. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled.
+Docker Compose starts `postgres`, a short-lived `db-role-provisioner`, a short-lived `migrations` service, `rabbitmq`, `prometheus`, `grafana`, `jaeger`, `mailhog`, `notification-service`, `identity-service`, `banking-api`, `gateway`, and `frontend`. Only Gateway is the browser-facing backend entry point; Notification and RabbitMQ metrics remain internal. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled.
 
 ## C4 level 3: backend components
 
@@ -173,11 +177,12 @@ Deposit and withdrawal handler methods and frontend client functions still exist
 
 ## Current data model and effective ownership
 
-All capabilities share one PostgreSQL schema.
+The local developer topology uses one PostgreSQL instance with three runtime roles. Banking owns the `public` schema, Identity owns `identity`, and Notification owns `notification`. Runtime roles are denied cross-schema access; HTTP commands and versioned events are the only cross-service data paths.
 
 | Data | Tables | Current writers/readers |
 | --- | --- | --- |
-| Identity and profile | `users`, `password_reset_tokens` | Banking API handlers, `db.Store`, and seed logic |
+| Identity | `identity.users`, `identity.password_reset_tokens` | Identity service and identity persistence adapter |
+| Banking customer/profile | `public.users` | Banking API, `db.Store`, and seed logic |
 | Accounts | `accounts` | Banking account handlers, ledger, payments, admin, and seeds |
 | Ledger | `entries` | Ledger and payment services write; account/payment APIs read |
 | Payments | `payment_orders`, `standing_orders`, `beneficiaries` | Payment service, payment handlers, worker, seeds |
@@ -185,7 +190,7 @@ All capabilities share one PostgreSQL schema.
 | Outbox | `outbox_events` | Payment transaction writes; Banking API/worker publisher leases and marks publication |
 | Notification inbox | `notification.processed_events` | Notification service only; event-ID claims and completed-delivery records |
 
-There is no database ownership boundary between Banking modules. Cross-capability joins are common and intentional inside Banking, for example payment booking locks accounts and writes entries, and VoP joins accounts to users. Notification uses the shared PostgreSQL instance only for its owned `notification.processed_events` table; Banking resolves the minimum delivery payload before the asynchronous boundary.
+There is no database ownership boundary between modules inside Banking Core. Cross-capability joins are common and intentional inside that one service, for example payment booking locks accounts and writes entries, and VoP joins accounts to Banking customer records. Notification uses the shared PostgreSQL instance only for its owned `notification.processed_events` table; Banking resolves the minimum delivery payload before the asynchronous boundary.
 
 ## Financial invariants
 
@@ -291,3 +296,7 @@ GitHub Actions provides:
 ## Phase 4 conclusion
 
 Notification is a real service boundary with an explicit private contract, independent runtime/configuration/health, data minimization, bounded calls, and no Banking-table access. Account, Payment, and Ledger remain one process and serializable PostgreSQL consistency boundary. The Phase 4 outbox removes the database-to-broker dual write; RabbitMQ downtime delays rather than rolls back notification delivery. Processing is explicitly at least once, with idempotent consumer storage and poison-message handling.
+
+## Phase 9–10 conclusion
+
+The project now has executable distributed fitness tests for duplicate delivery, malformed events, unsafe synchronous notification retries, idempotency conflicts, concurrent booking, and Identity outage isolation. Manual recovery procedures cover broker, notification and PostgreSQL downtime. The final architectural decision is to retain Account, Payment and Ledger together as Banking Core: there is no distributed financial transaction, saga or cross-service ledger write. Prometheus scrapes RabbitMQ's internal metrics endpoint and Grafana provisions the official RabbitMQ overview plus a focused DemoBank messaging dashboard. See [distributed fitness functions](distributed-fitness-functions.md), [final extraction decision](final-service-extraction-decision.md), and [RabbitMQ monitoring](../observability/rabbitmq-monitoring.md).
