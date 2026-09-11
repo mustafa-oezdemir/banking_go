@@ -381,6 +381,7 @@ func main() {
 	// Only the Identity service can provision a Banking Customer. This route is
 	// private in Compose and protected by an independent service token.
 	r.Post("/internal/customers/provision", h.ProvisionCustomerInternal)
+	r.Post("/internal/customers/{id}/sessions/revoke", h.RevokeCustomerSessionsInternal)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),

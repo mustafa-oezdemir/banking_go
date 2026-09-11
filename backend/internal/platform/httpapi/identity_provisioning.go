@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/identity"
@@ -15,9 +16,7 @@ import (
 // ProvisionCustomerInternal receives the only Identity-to-Banking command. It
 // is not browser-routable and remains idempotent for retry after a lost reply.
 func (h *Handler) ProvisionCustomerInternal(w http.ResponseWriter, r *http.Request) {
-	expected := strings.TrimSpace(os.Getenv("INTERNAL_SERVICE_TOKEN"))
-	provided := strings.TrimSpace(r.Header.Get("X-Internal-Service-Token"))
-	if len(expected) < 32 || len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+	if !validInternalServiceToken(r) {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
@@ -55,4 +54,29 @@ func (h *Handler) ProvisionCustomerInternal(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// RevokeCustomerSessionsInternal applies an Identity-owned credential change
+// to Banking's local session generation without exposing Banking persistence.
+func (h *Handler) RevokeCustomerSessionsInternal(w http.ResponseWriter, r *http.Request) {
+	if !validInternalServiceToken(r) {
+		respondError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid customer id")
+		return
+	}
+	if err = h.store.RevokeUserSessions(r.Context(), userID); err != nil {
+		respondError(w, http.StatusNotFound, "customer not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func validInternalServiceToken(r *http.Request) bool {
+	expected := strings.TrimSpace(os.Getenv("INTERNAL_SERVICE_TOKEN"))
+	provided := strings.TrimSpace(r.Header.Get("X-Internal-Service-Token"))
+	return len(expected) >= 32 && len(provided) == len(expected) && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }

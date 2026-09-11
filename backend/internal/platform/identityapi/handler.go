@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,11 +30,14 @@ const (
 	audience        = "pehlione-banking-api"
 	sessionCookie   = "jwt"
 	sessionLifetime = 15 * time.Minute
+	resetLifetime   = 15 * time.Minute
+	resetJobTimeout = 20 * time.Second
 )
 
 // CustomerProvisioner creates the Banking Customer after a successful identity registration.
 type CustomerProvisioner interface {
 	ProvisionCustomer(context.Context, uuid.UUID, string, string) error
+	RevokeCustomerSessions(context.Context, uuid.UUID) error
 }
 
 // PasswordResetSender delivers an already-generated password-reset command.
@@ -46,7 +52,7 @@ type Store interface {
 	Delete(context.Context, uuid.UUID) error
 	GetByEmail(context.Context, string) (uuid.UUID, string, bool, error)
 	CreatePasswordReset(context.Context, uuid.UUID, []byte, time.Time) error
-	ResetPassword(context.Context, []byte, string, time.Time) error
+	ResetPassword(context.Context, []byte, string, time.Time) (uuid.UUID, error)
 }
 
 // Handler owns identity HTTP workflows and never queries Banking persistence.
@@ -56,6 +62,7 @@ type Handler struct {
 	tokens      *jwtauth.JWTAuth
 	provisioner CustomerProvisioner
 	notifier    PasswordResetSender
+	dispatch    func(func())
 }
 
 // New creates the identity HTTP handler.
@@ -67,7 +74,7 @@ func New(store Store, secret string, provisioner CustomerProvisioner, notifier P
 		return nil, errors.New("JWT_SECRET must be at least 32 characters")
 	}
 	tokens := jwtauth.New("HS256", []byte(secret), nil, jwt.WithIssuer(issuer), jwt.WithAudience(audience))
-	return &Handler{store: store, auth: identity.NewAuthenticationService(store), tokens: tokens, provisioner: provisioner, notifier: notifier}, nil
+	return &Handler{store: store, auth: identity.NewAuthenticationService(store), tokens: tokens, provisioner: provisioner, notifier: notifier, dispatch: func(job func()) { go job() }}, nil
 }
 
 // Routes returns public Identity endpoints and its independent health check.
@@ -81,8 +88,8 @@ func (handler *Handler) Routes() http.Handler {
 	router.Post("/register", handler.register)
 	router.Post("/login", handler.login)
 	router.Post("/logout", handler.logout)
-	router.Post("/forgot-password", handler.forgotPassword)
-	router.Post("/reset-password", handler.resetPassword)
+	router.With(newIPRateLimiter(30, time.Minute)).Post("/forgot-password", handler.forgotPassword)
+	router.With(newIPRateLimiter(60, time.Minute)).Post("/reset-password", handler.resetPassword)
 	return router
 }
 
@@ -175,35 +182,46 @@ func (handler *Handler) forgotPassword(w http.ResponseWriter, request *http.Requ
 	var input struct {
 		Email string `json:"email"`
 	}
-	if decode(request, &input) != nil {
-		writeJSON(w, http.StatusAccepted, accepted())
-		return
-	}
+	_ = decode(request, &input)
 	email, err := identity.NormalizeEmail(input.Email)
 	if err != nil {
-		writeJSON(w, http.StatusAccepted, accepted())
-		return
+		email = ""
 	}
-	userID, name, found, err := handler.store.GetByEmail(request.Context(), email)
-	if err != nil || !found {
-		writeJSON(w, http.StatusAccepted, accepted())
-		return
+	dispatch := handler.dispatch
+	if dispatch == nil {
+		dispatch = func(job func()) { go job() }
 	}
+	dispatch(func() { handler.processPasswordReset(email) })
+	writeJSON(w, http.StatusAccepted, accepted())
+}
+
+func (handler *Handler) processPasswordReset(email string) {
+	ctx, cancel := context.WithTimeout(context.Background(), resetJobTimeout)
+	defer cancel()
 	raw := make([]byte, 32)
-	if _, err = rand.Read(raw); err != nil {
-		writeJSON(w, http.StatusAccepted, accepted())
+	if _, err := io.ReadFull(rand.Reader, raw); err != nil {
+		log.Warn().Msg("Password reset entropy generation failed")
 		return
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 	hash := sha256.Sum256([]byte(token))
-	if err = handler.store.CreatePasswordReset(request.Context(), userID, hash[:], time.Now().UTC().Add(15*time.Minute)); err == nil {
-		ctx, cancel := context.WithTimeout(request.Context(), 12*time.Second)
-		defer cancel()
-		if sendErr := handler.notifier.SendPasswordReset(ctx, email, name, token); sendErr != nil {
-			log.Warn().Err(sendErr).Msg("Password reset delivery failed")
-		}
+	lookupEmail := email
+	if lookupEmail == "" {
+		lookupEmail = "invalid-password-reset@invalid.example"
 	}
-	writeJSON(w, http.StatusAccepted, accepted())
+	userID, name, found, err := handler.store.GetByEmail(ctx, lookupEmail)
+	if err != nil || !found {
+		return
+	}
+	if err = handler.store.CreatePasswordReset(ctx, userID, hash[:], time.Now().UTC().Add(resetLifetime)); err != nil {
+		log.Warn().Msg("Password reset persistence failed")
+		return
+	}
+	if err = handler.notifier.SendPasswordReset(ctx, email, name, token); err != nil {
+		// Adapter error strings are intentionally omitted because they may contain
+		// a recipient or provider request details.
+		log.Warn().Msg("Password reset delivery failed")
+	}
 }
 
 func (handler *Handler) resetPassword(w http.ResponseWriter, request *http.Request) {
@@ -215,7 +233,8 @@ func (handler *Handler) resetPassword(w http.ResponseWriter, request *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(input.Token))
+	input.Token = strings.TrimSpace(input.Token)
+	raw, err := base64.RawURLEncoding.DecodeString(input.Token)
 	if err != nil || len(raw) != 32 {
 		writeError(w, http.StatusBadRequest, "reset link is invalid or expired")
 		return
@@ -230,8 +249,16 @@ func (handler *Handler) resetPassword(w http.ResponseWriter, request *http.Reque
 		return
 	}
 	tokenHash := sha256.Sum256([]byte(input.Token))
-	if err = handler.store.ResetPassword(request.Context(), tokenHash[:], hash, time.Now().UTC()); err != nil {
+	userID, err := handler.store.ResetPassword(request.Context(), tokenHash[:], hash, time.Now().UTC())
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "reset link is invalid or expired")
+		return
+	}
+	revokeCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
+	defer cancel()
+	if err = handler.provisioner.RevokeCustomerSessions(revokeCtx, userID); err != nil {
+		log.Error().Msg("Banking session revocation failed after password reset")
+		writeError(w, http.StatusServiceUnavailable, "password updated; session revocation is temporarily unavailable")
 		return
 	}
 	clearCookie(w, request)
@@ -301,4 +328,48 @@ func setCookie(w http.ResponseWriter, r *http.Request, token string) {
 }
 func clearCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0), HttpOnly: true, Secure: secure(r), SameSite: http.SameSiteStrictMode})
+}
+
+type rateWindow struct {
+	started time.Time
+	count   int
+}
+
+func newIPRateLimiter(limit int, window time.Duration) func(http.Handler) http.Handler {
+	var mutex sync.Mutex
+	clients := make(map[string]rateWindow)
+	lastCleanup := time.Now()
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			now := time.Now()
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				host = r.RemoteAddr
+			}
+			mutex.Lock()
+			if now.Sub(lastCleanup) >= window {
+				for key, candidate := range clients {
+					if now.Sub(candidate.started) >= window {
+						delete(clients, key)
+					}
+				}
+				lastCleanup = now
+			}
+			entry := clients[host]
+			if entry.started.IsZero() || now.Sub(entry.started) >= window {
+				entry = rateWindow{started: now}
+			}
+			entry.count++
+			clients[host] = entry
+			limited := entry.count > limit
+			retryAfter := max(1, int(time.Until(entry.started.Add(window)).Seconds()))
+			mutex.Unlock()
+			if limited {
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				writeError(w, http.StatusTooManyRequests, "too many requests")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

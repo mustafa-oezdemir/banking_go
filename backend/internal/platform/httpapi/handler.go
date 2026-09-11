@@ -26,12 +26,14 @@ import (
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger        *ledger.Service
-	payments      *payment.Service
-	profiles      *account.ProfileService
-	authenticator *identity.AuthenticationService
-	store         *db.Store
-	notifier      notification.Sender
+	ledger         *ledger.Service
+	payments       *payment.Service
+	profiles       *account.ProfileService
+	authenticator  *identity.AuthenticationService
+	store          *db.Store
+	notifier       notification.Sender
+	passwordResets passwordResetStore
+	dispatchReset  passwordResetDispatcher
 }
 
 func validateAccountName(rawName string) (string, error) {
@@ -67,7 +69,7 @@ func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 	return &Handler{
 		ledger: ledgerService, payments: payment.NewService(store, nil), profiles: account.NewProfileService(store),
 		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)), store: store,
-		notifier: notification.NoopSender{},
+		notifier: notification.NoopSender{}, passwordResets: store, dispatchReset: dispatchPasswordReset,
 	}
 }
 
@@ -77,7 +79,7 @@ func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payme
 	return &Handler{
 		ledger: ledgerService, payments: paymentService, profiles: account.NewProfileService(store),
 		authenticator: identity.NewAuthenticationService(db.NewIdentityRepository(store)),
-		store:         store, notifier: notification.NoopSender{},
+		store:         store, notifier: notification.NoopSender{}, passwordResets: store, dispatchReset: dispatchPasswordReset,
 	}
 }
 

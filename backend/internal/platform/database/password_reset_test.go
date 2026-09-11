@@ -91,3 +91,37 @@ func TestExpiredPasswordResetTokenIsRejected(t *testing.T) {
 	_, err = store.ResetPasswordWithToken(ctx, tokenHash[:], "replacement", time.Now().UTC())
 	require.True(t, errors.Is(err, sql.ErrNoRows))
 }
+
+func TestNewPasswordResetInvalidatesEarlierActiveToken(t *testing.T) {
+	dbURL := os.Getenv("TEST_DB_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("DB_URL")
+	}
+	if dbURL == "" {
+		t.Skip("TEST_DB_URL or DB_URL is required for integration tests")
+	}
+	database, err := sql.Open("postgres", dbURL)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, database.Close()) })
+
+	ctx := context.Background()
+	store := NewStore(database)
+	user, err := store.CreateUser(ctx, sqlc.CreateUserParams{
+		Email: "rotated-reset-" + uuid.NewString() + "@example.com", HashedPassword: "$2a$10$unchanged", FullName: "Rotation Test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, cleanupErr := database.ExecContext(context.Background(), `DELETE FROM users WHERE id = $1`, user.ID)
+		require.NoError(t, cleanupErr)
+	})
+	first := sha256.Sum256([]byte("first-one-time-token"))
+	second := sha256.Sum256([]byte("second-one-time-token"))
+	now := time.Now().UTC()
+	require.NoError(t, store.CreatePasswordResetToken(ctx, user.ID, first[:], now.Add(15*time.Minute)))
+	require.NoError(t, store.CreatePasswordResetToken(ctx, user.ID, second[:], now.Add(15*time.Minute)))
+
+	_, err = store.ResetPasswordWithToken(ctx, first[:], "replacement", now)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = store.ResetPasswordWithToken(ctx, second[:], "replacement", now)
+	require.NoError(t, err)
+}

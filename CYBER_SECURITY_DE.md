@@ -134,10 +134,11 @@ flowchart LR
 | -------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | bcrypt-Hash                      | `backend/internal/platform/httpapi/handler.go`, `credentials.go`         | Passwörter werden nicht im Klartext gespeichert, sondern mit bcrypt gehasht.                                               |
 | Passwortrichtlinie               | `backend/internal/identity/credentials.go`                                 | Mindestens 15 Zeichen, höchstens 72 Byte und Sperre häufiger Passwörter.                                                 |
-| Reduzierte Enumeration           | `handler.go`, `password_reset_handler.go`                   | Für unbekannte Benutzer wird ein Dummy-bcrypt-Vergleich ausgeführt; der Reset-Endpunkt liefert eine einheitliche Antwort. |
+| Reduzierte Enumeration und Timing | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/password_reset_handler.go` | Bekannte, unbekannte und ungültige E-Mails erhalten dieselbe `202`-Antwort mit generischem Text. Lookup, Entropie, Token-Speicherung und E-Mail laufen in einem zeitlich begrenzten Hintergrundjob. |
 | Kryptografisches Reset-Token     | `password_reset_handler.go`                                   | Erzeugt 32 zufällige Byte; in der Datenbank wird nur der Hash gespeichert.                                                 |
 | Einmalige Nutzung und 15 Minuten | `backend/internal/platform/database/password_reset.go`, Migration `000009` | Das Token wird gesperrt, auf Ablauf geprüft und atomar verbraucht.                                                         |
-| Session-Widerruf nach Reset      | `backend/internal/platform/database/password_reset.go`                       | Bei Passwortänderung wird`session_version` erhöht.                                                                      |
+| Session-Widerruf nach Reset      | `backend/internal/platform/identitystore/store.go`, `backend/internal/platform/bankingclient/client.go`, `backend/internal/platform/httpapi/security.go` | Identity erhöht die Session-Generation, sendet einen privaten Widerruf an Banking und alte JWT-Generationen werden abgelehnt. |
+| Token-/Payload-Logschutz | `backend/internal/platform/httpapi/password_reset_handler.go`, `backend/internal/platform/identityapi/handler.go` | Fehlerlogs des Reset-Flows enthalten weder Raw-Token noch E-Mail oder Adapter-Fehlerdetails. |
 
 ## 5. CSRF, CORS und HTTP-Sicherheitsheader
 
