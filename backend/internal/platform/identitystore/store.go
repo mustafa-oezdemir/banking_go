@@ -63,27 +63,43 @@ func (store *Store) GetByEmail(ctx context.Context, email string) (uuid.UUID, st
 
 // CreatePasswordReset stores a one-time hash, never the raw reset secret.
 func (store *Store) CreatePasswordReset(ctx context.Context, userID uuid.UUID, tokenHash []byte, expiresAt time.Time) error {
-	_, err := store.db.ExecContext(ctx, `INSERT INTO identity.password_reset_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, tokenHash, userID, expiresAt)
-	return err
-}
-
-// ResetPassword atomically consumes a valid reset token and increments the
-// Identity session generation.
-func (store *Store) ResetPassword(ctx context.Context, tokenHash []byte, passwordHash string, now time.Time) error {
 	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck // Commit below wins on success.
-	var userID uuid.UUID
-	err = tx.QueryRowContext(ctx, `DELETE FROM identity.password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2 RETURNING user_id`, tokenHash, now).Scan(&userID)
-	if err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE identity.password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE user_id = $1 AND used_at IS NULL`, userID); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE identity.users SET hashed_password = $1, session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, passwordHash, userID); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO identity.password_reset_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, tokenHash, userID, expiresAt); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ResetPassword atomically consumes a valid reset token and increments the
+// Identity session generation.
+func (store *Store) ResetPassword(ctx context.Context, tokenHash []byte, passwordHash string, now time.Time) (uuid.UUID, error) {
+	tx, err := store.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck // Commit below wins on success.
+	var userID uuid.UUID
+	err = tx.QueryRowContext(ctx, `DELETE FROM identity.password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2 RETURNING user_id`, tokenHash, now).Scan(&userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE identity.users SET hashed_password = $1, session_version = session_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, passwordHash, userID); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE identity.password_reset_tokens SET used_at = $2 WHERE user_id = $1 AND used_at IS NULL`, userID, now); err != nil {
+		return uuid.Nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
 }
 
 // RevokeSessions advances the Identity-side session generation.

@@ -157,6 +157,8 @@ func TestRequireActiveSessionRejectsUnknownBankingSubject(t *testing.T) {
 		return response
 	}
 	require.Equal(t, http.StatusNoContent, request().Code)
+	require.NoError(t, h.store.RevokeUserSessions(t.Context(), user.ID))
+	require.Equal(t, http.StatusUnauthorized, request().Code, "a token issued before reset must be rejected")
 	unknownToken, err := GenerateTokenForVersion(uuid.New(), 0)
 	require.NoError(t, err)
 	unknownRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)

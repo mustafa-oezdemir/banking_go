@@ -134,10 +134,10 @@ flowchart LR
 | --- | --- | --- |
 | bcrypt hash | `backend/internal/platform/httpapi/handler.go`, `credentials.go` | Parolalar düz metin tutulmaz; bcrypt ile hashlenir. |
 | Parola politikası | `backend/internal/identity/credentials.go` | Minimum 15 karakter, maksimum 72 byte ve yaygın parola engeli uygulanır. |
-| Enumeration ve timing azaltma | `backend/internal/platform/httpapi/password_reset_handler.go`, `backend/cmd/main.go` | Bilinen, bilinmeyen ve geçersiz e-posta için aynı `202`/generic mesaj döner. Normalize, lookup, entropy, token saklama ve e-posta arka plan işindedir; public route IP başına 5 istek/saat ile sınırlıdır. |
+| Enumeration ve timing azaltma | `backend/internal/platform/identityapi/handler.go`, `backend/internal/platform/httpapi/password_reset_handler.go` | Bilinen, bilinmeyen ve geçersiz e-posta için aynı `202`/generic mesaj döner. Hesap lookup, entropy, token saklama ve e-posta bounded arka plan işindedir. |
 | Kriptografik reset token | `backend/internal/platform/httpapi/password_reset_handler.go` | 32 random byte token üretilir; veritabanında token'ın hash'i tutulur. |
 | Tek kullanım ve 15 dakika | `backend/internal/platform/database/password_reset.go`, migration `000009` | Token kilitlenerek tüketilir, süresi doğrulanır ve tekrar kullanım engellenir. |
-| Reset sonrası session iptali | `backend/internal/platform/database/password_reset.go` | Parola değişince `session_version` artırılır. |
+| Reset sonrası session iptali | `backend/internal/platform/identitystore/store.go`, `backend/internal/platform/bankingclient/client.go`, `backend/internal/platform/httpapi/security.go` | Parola değişince Identity session generation artırılır, Banking'e private revocation command gönderilir ve eski generation taşıyan JWT reddedilir. |
 | Token/payload log gizliliği | `backend/internal/platform/httpapi/password_reset_handler.go`, `backend/internal/platform/identityapi/handler.go` | Reset akışının hata loglarına raw token, e-posta veya adapter hata detayları eklenmez. |
 
 ## 5. CSRF, CORS ve HTTP güvenlik başlıkları

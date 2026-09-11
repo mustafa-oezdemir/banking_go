@@ -28,12 +28,35 @@ func RequireActiveSession(store *db.Store) func(http.Handler) http.Handler {
 				respondError(w, http.StatusUnauthorized, "invalid token")
 				return
 			}
-			if _, err := store.GetUserByID(r.Context(), userID); err != nil {
+			tokenVersion, err := tokenSessionVersion(r)
+			if err != nil {
+				respondError(w, http.StatusUnauthorized, "invalid token")
+				return
+			}
+			currentVersion, err := store.GetUserSessionVersion(r.Context(), userID)
+			if err != nil || tokenVersion != currentVersion {
 				respondError(w, http.StatusUnauthorized, "customer access denied")
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func tokenSessionVersion(r *http.Request) (int64, error) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		return 0, err
+	}
+	switch value := claims["session_version"].(type) {
+	case float64:
+		return int64(value), nil
+	case int64:
+		return value, nil
+	case json.Number:
+		return value.Int64()
+	default:
+		return 0, errors.New("session_version claim missing")
 	}
 }
 
