@@ -17,6 +17,43 @@ services:
       timeout: 5s
       retries: 5
 
+  db-role-provisioner:
+    image: postgres:16
+    restart: "no"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-simple_ledger}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      BANKING_DB_PASSWORD: ${BANKING_DB_PASSWORD:?BANKING_DB_PASSWORD must be set in .env}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set in .env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?NOTIFICATION_DB_PASSWORD must be set in .env}
+    volumes:
+      - ./docker/postgres/provision-service-roles.sh:/usr/local/bin/provision-service-roles:ro
+    command: ["/bin/sh", "/usr/local/bin/provision-service-roles"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrations:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: "no"
+    command: ["/bin/true"]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-simple_ledger}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      RUN_DB_MIGRATIONS_ON_START: "true"
+    depends_on:
+      db-role-provisioner:
+        condition: service_completed_successfully
+
   mailhog:
     image: mailhog/mailhog:v1.0.1
     restart: unless-stopped
@@ -75,8 +112,8 @@ services:
       NOTIFICATION_DB_HOST: postgres
       NOTIFICATION_DB_PORT: 5432
       NOTIFICATION_DB_NAME: ${DB_NAME:-simple_ledger}
-      NOTIFICATION_DB_USER: ${DB_USER:-root}
-      NOTIFICATION_DB_PASSWORD: ${DB_PASSWORD:-secret}
+      NOTIFICATION_DB_USER: notification_app
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?NOTIFICATION_DB_PASSWORD must be set in .env}
       NOTIFICATION_DB_SSLMODE: ${DB_SSLMODE:-disable}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-banking}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}@rabbitmq:5672/
       RABBITMQ_RETRY_DELAY: ${RABBITMQ_RETRY_DELAY:-5s}
@@ -86,6 +123,8 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     healthcheck:
@@ -105,8 +144,8 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-simple_ledger}
-      DB_USER: ${DB_USER:-root}
-      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_USER: identity_app
+      DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?IDENTITY_DB_PASSWORD must be set in .env}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       BANKING_INTERNAL_URL: http://banking-api:${PORT:-8080}
@@ -118,6 +157,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       notification-service:
         condition: service_healthy
       jaeger:
@@ -138,8 +179,8 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-simple_ledger}
-      DB_USER: ${DB_USER:-root}
-      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      DB_USER: banking_app
+      DB_PASSWORD: ${BANKING_DB_PASSWORD:?BANKING_DB_PASSWORD must be set in .env}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
@@ -149,7 +190,7 @@ services:
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
       ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
       ENABLE_IN_PROCESS_SCHEDULER: ${ENABLE_IN_PROCESS_SCHEDULER:-true}
-      RUN_DB_MIGRATIONS_ON_START: ${RUN_DB_MIGRATIONS_ON_START:-true}
+      RUN_DB_MIGRATIONS_ON_START: "false"
       NOTIFICATION_SERVICE_URL: http://notification-service:8090
       NOTIFICATION_SERVICE_TOKEN: ${NOTIFICATION_SERVICE_TOKEN:?NOTIFICATION_SERVICE_TOKEN must be set in .env}
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -162,6 +203,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
       notification-service:
         condition: service_healthy
       jaeger:

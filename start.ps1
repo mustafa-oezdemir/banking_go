@@ -169,6 +169,40 @@ if (-not $rabbitPasswordMatch.Success -or
     Write-Host "Guvenli RABBITMQ_PASSWORD otomatik olusturuldu." -ForegroundColor Yellow
 }
 
+foreach ($serviceDatabaseSecret in @("BANKING_DB_PASSWORD", "IDENTITY_DB_PASSWORD", "NOTIFICATION_DB_PASSWORD")) {
+    $serviceDatabaseMatch = [regex]::Match($envContent, "(?m)^$serviceDatabaseSecret=(.*)$")
+    if (-not $serviceDatabaseMatch.Success -or
+        $serviceDatabaseMatch.Groups[1].Value.Trim().Length -lt 32 -or
+        $serviceDatabaseMatch.Groups[1].Value.Contains("replace-with")) {
+        $randomBytes = New-Object byte[] 32
+        $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try {
+            $randomGenerator.GetBytes($randomBytes)
+            $serviceDatabasePassword = [Convert]::ToBase64String($randomBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        }
+        finally {
+            $randomGenerator.Dispose()
+        }
+        $serviceDatabaseLine = "$serviceDatabaseSecret=$serviceDatabasePassword"
+        if ($serviceDatabaseMatch.Success) {
+            $envContent = [regex]::Replace(
+                $envContent,
+                "(?m)^$serviceDatabaseSecret=.*$",
+                [Text.RegularExpressions.MatchEvaluator]{ param($match) $serviceDatabaseLine },
+                1
+            )
+        }
+        else {
+            if ($envContent.Length -gt 0 -and -not $envContent.EndsWith("`n")) {
+                $envContent += [Environment]::NewLine
+            }
+            $envContent += $serviceDatabaseLine + [Environment]::NewLine
+        }
+        [IO.File]::WriteAllText($envPath, $envContent, (New-Object Text.UTF8Encoding($false)))
+        Write-Host "Guvenli $serviceDatabaseSecret otomatik olusturuldu." -ForegroundColor Yellow
+    }
+}
+
 Write-Host "PostgreSQL, RabbitMQ, MailHog ve Notification servisi baslatiliyor..." -ForegroundColor Cyan
 & docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --wait --wait-timeout 120 postgres rabbitmq mailhog notification-service
 if ($LASTEXITCODE -ne 0) {

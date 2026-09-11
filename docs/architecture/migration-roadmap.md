@@ -1,6 +1,6 @@
 # Evolutionary Migration Roadmap
 
-Status: Architecture Phase 7 completed
+Status: Architecture Phase 8 completed
 
 Last updated: 2026-09-11
 
@@ -22,7 +22,9 @@ Backward compatibility is preferred. Financial behavior is changed only with exp
 | 5. Extract identity service | Completed: credentials and sessions are owned by an Identity contract and schema | One new service |
 | 6. Introduce gateway and service auth | Completed: stable external routing and authenticated internal calls | Gateway |
 | 7. Add distributed observability | Completed: cross-service logs, metrics and traces | Jaeger |
-| 8. Harden architecture and contracts | Compatibility, resilience, security, recovery, and operations gates | No required new service |
+| 8. Data ownership hardening | Completed: schema-local PostgreSQL runtime roles and ownership fitness tests | Two short-lived control-plane containers |
+| 9. Contract & failure testing | Distributed architecture behavior and failure scenarios | None required |
+| 10. Final architecture review | Decision matrix and final C4 architecture review | No default new service |
 
 ## Phase 0 — Baseline analysis
 
@@ -163,20 +165,23 @@ Delivered:
 
 PII, secrets, JWTs, raw tokens, and unmasked financial identifiers remain excluded from telemetry.
 
-## Phase 8 — Harden architecture and contracts
+## Phase 8 — Data ownership hardening (completed)
 
-Goal: prove that the evolved system is maintainable and failure-safe.
+Delivered:
 
-Planned work:
+- Banking, Identity and Notification run under separate PostgreSQL roles with DML rights only for `public`, `identity`, and `notification` respectively;
+- an administrator-only role provisioner and migrator run before application services; their passwords remain outside Git;
+- migration 000015 revokes public schema access, grants schema-local rights, and supplies default privileges for future migrations;
+- automated architecture and integration checks verify Compose role wiring and effective cross-schema denial;
+- [service-data-ownership.md](service-data-ownership.md) and ADR-012 document the boundaries.
 
-- OpenAPI compatibility checks and consumer-driven/event contract tests;
-- schema migration compatibility and rollback rehearsals;
-- backup/restore and disaster-recovery exercises;
-- load/concurrency tests for idempotency and booking;
-- broker/SMTP/database outage tests;
-- dependency, image, SBOM, provenance, secret, and CodeQL gates;
-- documented runbooks for stuck payments, outbox lag, duplicate events, key rotation, and recovery;
-- architecture dependency checks required in CI.
+## Phase 9 — Contract & failure testing
+
+Goal: prove distributed behavior, including recovery and financial-invariant preservation, beyond happy paths.
+
+## Phase 10 — Final architecture review
+
+Goal: document the decision to retain Account, Payment and Ledger in Banking unless a specific learning goal justifies distributed financial transactions.
 
 ## Cross-phase safeguards
 
@@ -206,5 +211,6 @@ The following gates apply to every phase:
 | ADR-009 | 5 | Browser and service authentication model |
 | ADR-010 | 6 | API gateway scope and routing |
 | ADR-011 | 7 | Observability stack and sensitive-data policy |
+| ADR-012 | 8 | Enforced service data ownership with PostgreSQL roles |
 
 Create an ADR only when the decision is actually made; do not pre-decide technology to fill the sequence.

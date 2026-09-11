@@ -1,0 +1,51 @@
+-- Phase 8: PostgreSQL enforces the same ownership boundary documented by the
+-- services. The role-provisioner container assigns login passwords; this
+-- migration creates the roles without embedding credentials in source.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'banking_app') THEN
+        CREATE ROLE banking_app NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'identity_app') THEN
+        CREATE ROLE identity_app NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'notification_app') THEN
+        CREATE ROLE notification_app NOLOGIN NOINHERIT;
+    END IF;
+END $$;
+
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA identity FROM PUBLIC;
+REVOKE ALL ON SCHEMA notification FROM PUBLIC;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA identity FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA identity FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA notification FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA notification FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA public TO banking_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO banking_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO banking_app;
+
+GRANT USAGE ON SCHEMA identity TO identity_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA identity TO identity_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA identity TO identity_app;
+
+GRANT USAGE ON SCHEMA notification TO notification_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA notification TO notification_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA notification TO notification_app;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO banking_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO banking_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA identity
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO identity_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA identity
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO identity_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA notification
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO notification_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA notification
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO notification_app;

@@ -216,6 +216,22 @@ func TestNotificationExecutableCannotAccessBankingPrivatePersistence(t *testing.
 	}
 }
 
+func TestPrivatePersistenceAdaptersStayWithinOwnedSchemas(t *testing.T) {
+	testCases := []struct{ path, required, forbidden string }{
+		{filepath.Join("..", "platform", "identitystore", "store.go"), "identity.", "notification."},
+		{filepath.Join("..", "platform", "notificationstore", "store.go"), "notification.", "identity."},
+	}
+	for _, testCase := range testCases {
+		content, err := os.ReadFile(testCase.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", testCase.path, err)
+		}
+		if !strings.Contains(string(content), testCase.required) || strings.Contains(string(content), testCase.forbidden) {
+			t.Errorf("%s violates its private schema boundary", testCase.path)
+		}
+	}
+}
+
 func assertOnlyDirectories(t *testing.T, root string, allowedDirectories map[string]bool) {
 	t.Helper()
 	entries, err := os.ReadDir(root)

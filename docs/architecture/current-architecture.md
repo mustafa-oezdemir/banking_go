@@ -1,16 +1,16 @@
 # Current Architecture
 
-Status: Architecture Phase 7 with Identity, Gateway, and distributed observability
+Status: Architecture Phase 8 with enforced service data ownership
 
 Last verified: 2026-09-11
 
-Scope: Phase 4–7 completion state
+Scope: Phase 4–8 completion state
 
 ## Purpose and system boundary
 
 Pehlione DemoBank is a learning and portfolio application. It simulates EUR accounts, SEPA-style payments, scheduled payments, and double-entry bookkeeping. It does not connect to a bank, payment rail, or real-money provider.
 
-The Banking Core remains a modular monolith for Account, Payment and Ledger. Identity is a separate Go service that owns its `identity` schema and session issuance; Banking owns Customers and accounts and never queries Identity persistence. Notification is separately deployed, owns email-provider delivery and a processed-event inbox, and never queries Banking-owned tables.
+The Banking Core remains a modular monolith for Account, Payment and Ledger. Identity is a separate Go service that owns its `identity` schema and session issuance; Banking owns Customers and accounts and never queries Identity persistence. Notification is separately deployed, owns email-provider delivery and a processed-event inbox, and never queries Banking-owned tables. Runtime services use distinct PostgreSQL roles and cannot access another service's private schema; see [service data ownership](service-data-ownership.md).
 
 ## C4 level 1: system context
 
@@ -38,7 +38,7 @@ flowchart LR
     Notification["Notification service\nGo/Chi port 8090"]
     Scheduler["In-process scheduler"]
     Worker["Optional Go payment worker"]
-    DB[("PostgreSQL 16\none shared schema")]
+    DB[("PostgreSQL 16\nschema-local runtime roles")]
     Rabbit["RabbitMQ\ndurable event broker"]
     MailHog["MailHog SMTP/UI"]
     Resend["Resend API"]
@@ -61,7 +61,7 @@ flowchart LR
     API -->|"SSE refresh signals"| Browser
 ```
 
-Docker Compose starts `postgres`, `rabbitmq`, `jaeger`, `mailhog`, `notification-service`, `identity-service`, `banking-api`, `gateway`, and `frontend`. Only Gateway is the browser-facing backend entry point; Notification remains internal. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled.
+Docker Compose starts `postgres`, a short-lived `db-role-provisioner`, a short-lived `migrations` service, `rabbitmq`, `jaeger`, `mailhog`, `notification-service`, `identity-service`, `banking-api`, `gateway`, and `frontend`. Only Gateway is the browser-facing backend entry point; Notification remains internal. The normal Banking API process also runs a 30-second scheduled-payment loop unless disabled.
 
 ## C4 level 3: backend components
 
