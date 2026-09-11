@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -19,6 +21,11 @@ import (
 	paymentdomain "github.com/mustafa-oezdemir/banking_go/internal/payment/domain"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
 	"github.com/mustafa-oezdemir/banking_go/postgres/sqlc"
+)
+
+var (
+	paymentMarkupPattern = regexp.MustCompile(`(?i)</?[a-z][^>]*>`)
+	bicPattern           = regexp.MustCompile(`^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$`)
 )
 
 const (
@@ -454,17 +461,20 @@ func (s *Service) bookPaymentTx(ctx context.Context, q *sqlc.Queries, order sqlc
 }
 
 func validatePaymentInput(input CreatePaymentInput, now time.Time) (decimal.Decimal, error) {
-	if input.OwnerID == uuid.Nil || input.SourceAccountID == uuid.Nil || input.BeneficiaryName == "" || utf8.RuneCountInString(input.BeneficiaryName) > 140 {
+	if input.OwnerID == uuid.Nil || input.SourceAccountID == uuid.Nil || !validPaymentPlainText(input.BeneficiaryName, 1, 140, true) {
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
 	if err := sepa.ValidateIBAN(input.BeneficiaryIBAN); err != nil {
 		return decimal.Zero, err
 	}
+	if input.BeneficiaryBIC != "" && !bicPattern.MatchString(input.BeneficiaryBIC) {
+		return decimal.Zero, ErrInvalidPaymentInput
+	}
 	amount, err := ledger.ParseEURAmount(input.Amount)
 	if err != nil {
 		return decimal.Zero, ErrInvalidAmount
 	}
-	if utf8.RuneCountInString(input.Purpose) > 140 {
+	if !validPaymentPlainText(input.Purpose, 0, 140, false) || !validPaymentPlainText(input.CreditorReference, 0, 35, false) {
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
 	if len(input.IdempotencyKey) < 8 || len(input.IdempotencyKey) > 128 {
@@ -483,6 +493,38 @@ func validatePaymentInput(input CreatePaymentInput, now time.Time) (decimal.Deci
 		return decimal.Zero, ErrInvalidPaymentInput
 	}
 	return amount, nil
+}
+
+func validPaymentPlainText(value string, min, max int, required bool) bool {
+	if value == "" && !required {
+		return true
+	}
+	length := utf8.RuneCountInString(value)
+	if length < min || length > max || paymentMarkupPattern.MatchString(value) {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
+}
+
+// NormalizePayeeName applies the payment boundary's plain-text policy to a
+// beneficiary name that may be persisted or echoed back to a customer.
+func NormalizePayeeName(raw string) (string, error) {
+	return NormalizePaymentPlainText(raw, 1, 140, true)
+}
+
+// NormalizePaymentPlainText validates an explicitly plain-text payment field.
+// It is intentionally not appropriate for passwords, tokens, or identifiers.
+func NormalizePaymentPlainText(raw string, min, max int, required bool) (string, error) {
+	value := strings.TrimSpace(raw)
+	if !validPaymentPlainText(value, min, max, required) {
+		return "", ErrInvalidPaymentInput
+	}
+	return value, nil
 }
 
 func samePaymentIntent(order sqlc.PaymentOrder, input CreatePaymentInput, amount decimal.Decimal) bool {

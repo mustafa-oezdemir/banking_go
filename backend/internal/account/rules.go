@@ -6,12 +6,16 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
 const maxAccountNameLength = 100
 
-var phonePattern = regexp.MustCompile(`^[+0-9() /-]+$`)
+var (
+	phonePattern  = regexp.MustCompile(`^[+0-9() /-]+$`)
+	markupPattern = regexp.MustCompile(`(?i)</?[a-z][^>]*>`)
+)
 
 // ProfileInput is the customer-maintained profile data accepted by the account boundary.
 type ProfileInput struct {
@@ -27,14 +31,7 @@ type ProfileInput struct {
 
 // ValidateName normalizes and validates a customer-visible account name.
 func ValidateName(raw string) (string, error) {
-	name := strings.TrimSpace(raw)
-	if name == "" {
-		return "", errors.New("account name is required")
-	}
-	if utf8.RuneCountInString(name) > maxAccountNameLength {
-		return "", errors.New("account name must be 100 characters or fewer")
-	}
-	return name, nil
+	return normalizePlainText(raw, "account name", 1, maxAccountNameLength, true)
 }
 
 // NormalizeProfile canonicalizes and validates customer-maintained profile data.
@@ -48,21 +45,24 @@ func NormalizeProfile(input ProfileInput, now time.Time) (ProfileInput, time.Tim
 	input.City = strings.TrimSpace(input.City)
 	input.CountryCode = strings.ToUpper(strings.TrimSpace(input.CountryCode))
 
-	if utf8.RuneCountInString(input.FullName) < 2 || utf8.RuneCountInString(input.FullName) > 100 {
-		return ProfileInput{}, time.Time{}, errors.New("full_name must contain between 2 and 100 characters")
+	var err error
+	if input.FullName, err = normalizePlainText(input.FullName, "full_name", 2, 100, true); err != nil {
+		return ProfileInput{}, time.Time{}, err
 	}
 	if len(input.Phone) < 7 || len(input.Phone) > 32 || !phonePattern.MatchString(input.Phone) {
 		return ProfileInput{}, time.Time{}, errors.New("phone format is invalid")
 	}
-	if utf8.RuneCountInString(input.AddressLine1) < 3 || utf8.RuneCountInString(input.AddressLine1) > 120 ||
-		utf8.RuneCountInString(input.AddressLine2) > 120 {
-		return ProfileInput{}, time.Time{}, errors.New("address format is invalid")
+	if input.AddressLine1, err = normalizePlainText(input.AddressLine1, "address_line1", 3, 120, true); err != nil {
+		return ProfileInput{}, time.Time{}, err
 	}
-	if len(input.PostalCode) < 3 || len(input.PostalCode) > 12 {
-		return ProfileInput{}, time.Time{}, errors.New("postal_code must contain between 3 and 12 characters")
+	if input.AddressLine2, err = normalizePlainText(input.AddressLine2, "address_line2", 0, 120, false); err != nil {
+		return ProfileInput{}, time.Time{}, err
 	}
-	if utf8.RuneCountInString(input.City) < 2 || utf8.RuneCountInString(input.City) > 80 {
-		return ProfileInput{}, time.Time{}, errors.New("city must contain between 2 and 80 characters")
+	if input.PostalCode, err = normalizePlainText(input.PostalCode, "postal_code", 3, 12, true); err != nil {
+		return ProfileInput{}, time.Time{}, err
+	}
+	if input.City, err = normalizePlainText(input.City, "city", 2, 80, true); err != nil {
+		return ProfileInput{}, time.Time{}, err
 	}
 	if len(input.CountryCode) != 2 || input.CountryCode[0] < 'A' || input.CountryCode[0] > 'Z' || input.CountryCode[1] < 'A' || input.CountryCode[1] > 'Z' {
 		return ProfileInput{}, time.Time{}, errors.New("country_code must be a two-letter ISO code")
@@ -72,4 +72,24 @@ func NormalizeProfile(input ProfileInput, now time.Time) (ProfileInput, time.Tim
 		return ProfileInput{}, time.Time{}, errors.New("birth_date is invalid")
 	}
 	return input, birthDate, nil
+}
+
+func normalizePlainText(raw, field string, min, max int, required bool) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" && !required {
+		return "", nil
+	}
+	length := utf8.RuneCountInString(value)
+	if length < min || length > max {
+		return "", errors.New(field + " has an invalid length")
+	}
+	if markupPattern.MatchString(value) {
+		return "", errors.New(field + " must not contain HTML markup")
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return "", errors.New(field + " must not contain control characters")
+		}
+	}
+	return value, nil
 }

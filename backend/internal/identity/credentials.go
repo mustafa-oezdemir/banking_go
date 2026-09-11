@@ -4,7 +4,10 @@ package identity
 import (
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -24,6 +27,8 @@ var commonPasswords = map[string]struct{}{
 	"qwertyqwerty123": {},
 	"welcome12345678": {},
 }
+
+var identityMarkupPattern = regexp.MustCompile(`(?i)</?[a-z][^>]*>`)
 
 var dummyPasswordHash = func() []byte {
 	hash, err := bcrypt.GenerateFromPassword([]byte("timing-defense-password"), bcrypt.DefaultCost)
@@ -66,6 +71,25 @@ func NormalizeEmail(rawEmail string) (string, error) {
 		return "", errors.New("a valid email address is required")
 	}
 	return email, nil
+}
+
+// NormalizeFullName validates a customer-visible plain-text identity name.
+// Passwords and opaque credentials deliberately use separate validators.
+func NormalizeFullName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	length := utf8.RuneCountInString(name)
+	if length < 2 || length > 100 {
+		return "", errors.New("full name must contain between 2 and 100 characters")
+	}
+	if identityMarkupPattern.MatchString(name) {
+		return "", errors.New("full name must not contain HTML markup")
+	}
+	for _, character := range name {
+		if unicode.IsControl(character) {
+			return "", errors.New("full name must not contain control characters")
+		}
+	}
+	return name, nil
 }
 
 // ValidatePassword applies the registration and reset password policy.

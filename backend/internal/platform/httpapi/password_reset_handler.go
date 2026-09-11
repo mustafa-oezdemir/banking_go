@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -33,7 +32,7 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -81,7 +80,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		Token       string `json:"token"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}

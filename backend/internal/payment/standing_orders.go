@@ -37,10 +37,14 @@ type CreateStandingOrderInput struct {
 func (s *Service) CreateStandingOrder(ctx context.Context, input CreateStandingOrderInput) (sqlc.StandingOrder, error) {
 	input.BeneficiaryName = strings.TrimSpace(input.BeneficiaryName)
 	input.BeneficiaryIBAN = sepa.NormalizeIBAN(input.BeneficiaryIBAN)
+	input.BeneficiaryBIC = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(input.BeneficiaryBIC), " ", ""))
+	input.Purpose = strings.TrimSpace(input.Purpose)
+	input.CreditorReference = strings.TrimSpace(input.CreditorReference)
 	input.TransferType = strings.ToUpper(strings.TrimSpace(input.TransferType))
 	input.Frequency = strings.ToUpper(strings.TrimSpace(input.Frequency))
 	amount, err := ledger.ParseEURAmount(input.Amount)
-	if err != nil || input.BeneficiaryName == "" {
+	if err != nil || !validPaymentPlainText(input.BeneficiaryName, 1, 140, true) ||
+		!validPaymentPlainText(input.Purpose, 0, 140, false) || !validPaymentPlainText(input.CreditorReference, 0, 35, false) {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
 	}
 	if validationErr := sepa.ValidateIBAN(input.BeneficiaryIBAN); validationErr != nil {
@@ -98,7 +102,8 @@ func (s *Service) CreateStandingOrder(ctx context.Context, input CreateStandingO
 // UpdateStandingOrder changes the mutable fields of an owner-authorized standing order.
 func (s *Service) UpdateStandingOrder(ctx context.Context, ownerID, orderID uuid.UUID, amount, purpose, status string, endDate *time.Time, maxOccurrences *int32) (sqlc.StandingOrder, error) {
 	value, err := ledger.ParseEURAmount(amount)
-	if err != nil {
+	purpose = strings.TrimSpace(purpose)
+	if err != nil || !validPaymentPlainText(purpose, 0, 140, false) {
 		return sqlc.StandingOrder{}, ErrStandingOrderInvalid
 	}
 	status = strings.ToUpper(strings.TrimSpace(status))

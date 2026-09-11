@@ -458,7 +458,17 @@ func (h *Handler) CreateBeneficiary(w http.ResponseWriter, r *http.Request) {
 		BIC      string `json:"bic"`
 		Category string `json:"category"`
 	}
-	if err = decodeStrictJSON(r, &input); err != nil || strings.TrimSpace(input.Name) == "" {
+	if err = decodeStrictJSON(r, &input); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	name, err := payment.NormalizePayeeName(input.Name)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid input")
+		return
+	}
+	category, err := payment.NormalizePaymentPlainText(input.Category, 0, 64, false)
+	if err != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -468,9 +478,9 @@ func (h *Handler) CreateBeneficiary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.store.CreateBeneficiary(r.Context(), sqlc.CreateBeneficiaryParams{
-		OwnerID: ownerID, Name: strings.TrimSpace(input.Name), Iban: iban,
+		OwnerID: ownerID, Name: name, Iban: iban,
 		Bic:      sql.NullString{String: strings.TrimSpace(input.BIC), Valid: strings.TrimSpace(input.BIC) != ""},
-		Category: sql.NullString{String: strings.TrimSpace(input.Category), Valid: strings.TrimSpace(input.Category) != ""},
+		Category: sql.NullString{String: category, Valid: category != ""},
 	})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save beneficiary")
@@ -571,8 +581,10 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+const maxJSONRequestBytes int64 = 64 << 10
+
 func decodeStrictJSON(r *http.Request, target any) error {
-	decoder := json.NewDecoder(r.Body)
+	decoder := json.NewDecoder(io.LimitReader(r.Body, maxJSONRequestBytes+1))
 	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

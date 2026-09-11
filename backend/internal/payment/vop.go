@@ -34,6 +34,9 @@ type VoPResult struct {
 // VerifyPayee resolves an internal demo account or a user's saved demo payee.
 // Unknown external IBANs return OTHER because no real banking network is used.
 func (s *Service) VerifyPayee(ctx context.Context, ownerID uuid.UUID, providedName, rawIBAN string) (VoPResult, error) {
+	if _, err := NormalizePayeeName(providedName); err != nil {
+		return VoPResult{}, err
+	}
 	iban := sepa.NormalizeIBAN(rawIBAN)
 	if err := sepa.ValidateIBAN(iban); err != nil {
 		return VoPResult{}, err

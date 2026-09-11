@@ -113,7 +113,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		FullName string `json:"full_name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		log.Warn().Err(err).Msg("Failed to decode register request")
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
@@ -125,6 +125,11 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if validationErr = identity.ValidatePassword(input.Password); validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+	fullName, validationErr := identity.NormalizeFullName(defaultFullName(input.FullName, email))
+	if validationErr != nil {
 		respondError(w, http.StatusBadRequest, validationErr.Error())
 		return
 	}
@@ -141,7 +146,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	customer, err := h.ledger.CreateFundedCustomer(r.Context(), ledger.NewCustomer{
 		Email:          email,
 		HashedPassword: hashed,
-		FullName:       defaultFullName(input.FullName, email),
+		FullName:       fullName,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create user")
@@ -188,7 +193,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := decodeStrictJSON(r, &input); err != nil {
 		log.Warn().Err(err).Msg("Failed to decode login request")
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
@@ -283,7 +288,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name string `json:"name"`
 	}
-	if decodeErr := json.NewDecoder(r.Body).Decode(&input); decodeErr != nil {
+	if decodeErr := decodeStrictJSON(r, &input); decodeErr != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
@@ -458,7 +463,7 @@ func (h *Handler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name string `json:"name"`
 	}
-	if decodeErr := json.NewDecoder(r.Body).Decode(&input); decodeErr != nil {
+	if decodeErr := decodeStrictJSON(r, &input); decodeErr != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
