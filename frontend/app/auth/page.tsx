@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { forgotPassword, login, register } from "@/lib/api";
+import { emailError, normalizePlainText, passwordError, plainTextError } from "@/lib/inputValidation";
 import { useAuthStore } from "@/lib/store/authStore";
 
 type AuthMode = "login" | "register" | "forgot";
@@ -35,9 +36,20 @@ export default function AuthPage() {
 		const data = new FormData(event.currentTarget);
 		const email = String(data.get("email") || "");
 		const password = String(data.get("password") || "");
+		const emailValidation = emailError(email);
+		if (emailValidation) { setMessage(emailValidation); return; }
+		if (mode !== "forgot") {
+			const passwordValidation = passwordError(password, mode === "register");
+			if (passwordValidation) { setMessage(passwordValidation); return; }
+		}
+		const fullName = String(data.get("fullName") || "");
+		if (mode === "register") {
+			const nameValidation = plainTextError(fullName, "Vollständiger Name", { required: true, min: 2, max: 100 });
+			if (nameValidation) { setMessage(nameValidation); return; }
+		}
 		try {
 			if (mode === "forgot") {
-				const result = await forgotPassword(email);
+				const result = await forgotPassword(email.trim());
 				if (!result.response.ok) throw new Error("Die Anfrage konnte nicht verarbeitet werden.");
 				setSuccess(true);
 				setMessage("Falls die Adresse registriert ist, wurde eine E-Mail mit einem 15 Minuten gültigen Link versendet.");
@@ -46,7 +58,7 @@ export default function AuthPage() {
 
 			const result = mode === "login"
 				? await login(email, password)
-				: await register(email, password, String(data.get("fullName") || ""));
+				: await register(email.trim(), password, normalizePlainText(fullName));
 			if (!result.response.ok) {
 				const apiError = typeof result.data === "object" && result.data !== null && "error" in result.data
 					? String((result.data as { error: unknown }).error)
@@ -99,7 +111,7 @@ export default function AuthPage() {
 						<button type="button" onClick={() => changeMode("register")} className={`rounded-md py-2 text-sm font-semibold ${mode === "register" ? "bg-white text-[#003b70] shadow-sm" : "text-slate-500"}`}>Registrieren</button>
 					</div>}
 					<form onSubmit={submit} className="mt-6 space-y-5">
-						{mode === "register" && <label className="block"><span className="mb-2 block text-sm font-semibold">Vollständiger Name</span><input name="fullName" required maxLength={140} autoComplete="name" className="bank-input" placeholder="Anna Beispiel" /></label>}
+					{mode === "register" && <label className="block"><span className="mb-2 block text-sm font-semibold">Vollständiger Name</span><input name="fullName" required minLength={2} maxLength={100} autoComplete="name" className="bank-input" placeholder="Anna Beispiel" /></label>}
 						<label className="block"><span className="mb-2 block text-sm font-semibold">E-Mail-Adresse</span><input name="email" required type="text" inputMode="email" autoComplete="email" className="bank-input" placeholder="name@beispiel.de" /></label>
 						{mode !== "forgot" && <label className="block"><span className="mb-2 block text-sm font-semibold">Passwort</span><input name="password" required type="password" minLength={mode === "register" ? 15 : undefined} maxLength={72} autoComplete={mode === "login" ? "current-password" : "new-password"} className="bank-input" /><span className="mt-1 block text-xs text-slate-400">{mode === "register" ? "Mindestens 15 Zeichen." : "Ihre Zugangsdaten."}</span></label>}
 						{message && <div role="alert" className={`rounded-lg border p-3 text-sm ${success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{message}</div>}
