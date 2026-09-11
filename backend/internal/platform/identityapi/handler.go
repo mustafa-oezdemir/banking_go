@@ -194,7 +194,9 @@ func (handler *Handler) forgotPassword(w http.ResponseWriter, request *http.Requ
 		ctx, cancel := context.WithTimeout(request.Context(), 12*time.Second)
 		defer cancel()
 		if sendErr := handler.notifier.SendPasswordReset(ctx, email, name, token); sendErr != nil {
-			log.Warn().Err(sendErr).Msg("Password reset delivery failed")
+			// Delivery errors are intentionally not attached: an adapter must never
+			// be able to reflect the raw reset secret into structured logs.
+			log.Warn().Msg("Password reset delivery failed")
 		}
 	}
 	writeJSON(w, http.StatusAccepted, accepted())
