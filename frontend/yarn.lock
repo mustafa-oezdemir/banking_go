@@ -1102,7 +1102,7 @@ browserslist@^4.24.0:
   integrity sha512-ZC5Bd0LgJXgwGqUknZY/vkUQ04r8NXnJZ3yYi4vDmSiZmC/pdSN0NbNRPxZpbtO4uAfDUAFffO8IZoM3Gj8IkA==
   dependencies:
     baseline-browser-mapping "^2.9.0"
-    caniuse-lite "^1.0.30031759"
+    caniuse-lite "^1.0.30001759"
     electron-to-chromium "^1.5.263"
     node-releases "^2.0.27"
     update-browserslist-db "^1.2.0"
@@ -1138,10 +1138,10 @@ callsites@^3.0.0:
   resolved "https://registry.npmjs.org/callsites/-/callsites-3.1.0.tgz"
   integrity sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==
 
-caniuse-lite@^1.0.30031579, caniuse-lite@^1.0.30031759:
-  version "1.0.30031781"
-  resolved "https://registry.npmjs.org/caniuse-lite/-/caniuse-lite-1.0.30031781.tgz"
-  integrity sha512-RdwNCyMsNBftLjW6w01z8bKEvT6e/5tpPVEgtn22TiLGlstHOVecsX2KHFkD5e/vRnIE4EGzpuIODb3mtswtkw==
+caniuse-lite@1.0.30001810, caniuse-lite@^1.0.30031579, caniuse-lite@^1.0.30031759:
+  version "1.0.30001810"
+  resolved "https://registry.yarnpkg.com/caniuse-lite/-/caniuse-lite-1.0.30001810.tgz#4970b477dea3278374de9bc43aa8f5d39fc3cda2"
+  integrity sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==
 
 chalk@^4.0.0:
   version "4.1.2"
@@ -2408,7 +2408,7 @@ next@16.3.4:
     "@next/env" "16.3.4"
     "@swc/helpers" "0.5.23"
     baseline-browser-mapping "^2.9.19"
-    caniuse-lite "^1.0.30031579"
+    caniuse-lite "^1.0.30001579"
     postcss "8.5.23"
     styled-jsx "5.1.6"
   optionalDependencies:
