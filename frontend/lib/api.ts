@@ -22,6 +22,8 @@ import type {
 	CustomerProfile,
 	CustomerProfileUpdate,
 	MerchantPaymentIntent,
+	PaymentCard,
+	IssuedPaymentCard,
 } from "@/lib/types";
 
 /**
@@ -138,6 +140,19 @@ export async function resetPassword(
  */
 export async function getAccounts(): Promise<ApiResponse<Account[]>> {
   return request<Account[]>(API_ENDPOINTS.ACCOUNTS);
+}
+
+/** List virtual cards without ever returning their PAN or CVC. */
+export async function getCards(): Promise<ApiResponse<PaymentCard[]>> {
+	return request<PaymentCard[]>(API_ENDPOINTS.CARDS);
+}
+
+/** Issue a virtual card for one of the customer's active EUR accounts. */
+export async function issueCard(accountId: string): Promise<ApiResponse<IssuedPaymentCard>> {
+	return request<IssuedPaymentCard>(API_ENDPOINTS.CARDS, {
+		method: "POST",
+		body: JSON.stringify({ account_id: accountId }),
+	});
 }
 
 /**

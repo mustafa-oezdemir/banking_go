@@ -75,6 +75,23 @@ export interface Account {
 	updated_at: string;
 }
 
+/** A virtual card without sensitive credentials. */
+export interface PaymentCard {
+	id: string;
+	account_id: string;
+	brand: string;
+	last4: string;
+	exp_month: number;
+	exp_year: number;
+	status: "ACTIVE" | "BLOCKED" | "EXPIRED";
+}
+
+/** Returned once when a virtual card is issued. Keep only in browser memory. */
+export interface IssuedPaymentCard extends PaymentCard {
+	card_number: string;
+	cvc: string;
+}
+
 export interface Entry {
   id: string;
   account_id: string;

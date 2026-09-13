@@ -70,6 +70,17 @@ func (service *Service) Issue(ctx context.Context, ownerID, accountID uuid.UUID)
 	if err != nil || !sepa.CustomerCanOperate(ownerID, account.OwnerID.UUID, account.OwnerID.Valid, account.IsSystem) || account.Status != "ACTIVE" || account.Currency != "EUR" {
 		return IssuedCard{}, ErrCardUnavailable
 	}
+	// A single active virtual card per account keeps card lifecycle predictable.
+	// Credentials are deliberately only shown at the moment of issuance.
+	existing, err := service.store.ListPaymentCardsByOwner(ctx, ownerID)
+	if err != nil {
+		return IssuedCard{}, err
+	}
+	for _, item := range existing {
+		if item.AccountID == accountID && item.Status == "ACTIVE" {
+			return IssuedCard{}, ErrCardUnavailable
+		}
+	}
 	pan, err := generatePAN()
 	if err != nil {
 		return IssuedCard{}, err

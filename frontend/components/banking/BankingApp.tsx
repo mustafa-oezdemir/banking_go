@@ -9,11 +9,13 @@ import {
 	getAccountTransactions,
 	getAccount,
 	getAccounts,
+	getCards,
 	getBeneficiaries,
 	getPayments,
 	getStandingOrders,
 	getSession,
 	getProfile,
+	issueCard,
 	getAdminOverview,
 	updateAdminUserRole,
 	updateAdminAccountStatus,
@@ -24,15 +26,16 @@ import {
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { normalizePlainText, plainTextError } from "@/lib/inputValidation";
-import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, Payment, StandingOrder } from "@/lib/types";
+import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, IssuedPaymentCard, Payment, PaymentCard, StandingOrder } from "@/lib/types";
 import { TransferWizard } from "./TransferWizard";
 
-type View = "overview" | "accounts" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
-type NavigationIcon = "home" | "wallet" | "activity" | "send" | "calendar" | "repeat" | "users" | "settings" | "shield";
+type View = "overview" | "accounts" | "cards" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
+type NavigationIcon = "home" | "wallet" | "card" | "activity" | "send" | "calendar" | "repeat" | "users" | "settings" | "shield";
 
 const customerNavigation: Array<{ id: View; label: string; icon: NavigationIcon }> = [
 	{ id: "overview", label: "Übersicht", icon: "home" },
 	{ id: "accounts", label: "Konten", icon: "wallet" },
+	{ id: "cards", label: "Karten", icon: "card" },
 	{ id: "transactions", label: "Umsätze", icon: "activity" },
 	{ id: "transfer", label: "Überweisen", icon: "send" },
 	{ id: "scheduled", label: "Terminüberweisungen", icon: "calendar" },
@@ -51,6 +54,7 @@ export function BankingApp() {
 	const logout = useAuthStore((state) => state.logout);
 	const [view, setView] = useState<View>("overview");
 	const [entries, setEntries] = useState<Entry[]>([]);
+	const [cards, setCards] = useState<PaymentCard[]>([]);
 	const [payments, setPayments] = useState<Payment[]>([]);
 	const [standingOrders, setStandingOrders] = useState<StandingOrder[]>([]);
 	const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>([]);
@@ -88,11 +92,13 @@ export function BankingApp() {
 		try {
 			const sessionResult = await getSession();
 			if (sessionResult.response.ok) setRole(sessionResult.data.role);
-			const [accountResult, paymentResult, standingResult, beneficiaryResult] = await Promise.all([
-				getAccounts(), getPayments(), getStandingOrders(), getBeneficiaries(),
+			const [accountResult, cardResult, paymentResult, standingResult, beneficiaryResult] = await Promise.all([
+				getAccounts(), getCards(), getPayments(), getStandingOrders(), getBeneficiaries(),
 			]);
 			if (!accountResult.response.ok) throw new Error("Konten konnten nicht geladen werden.");
 			setAccounts(accountResult.data);
+			if (!cardResult.response.ok) throw new Error("Karten konnten nicht geladen werden.");
+			setCards(cardResult.data);
 			setPayments(paymentResult.response.ok ? paymentResult.data : []);
 			setStandingOrders(standingResult.response.ok ? standingResult.data : []);
 			setBeneficiaries(beneficiaryResult.response.ok ? beneficiaryResult.data : []);
@@ -233,6 +239,7 @@ export function BankingApp() {
 						<>
 							{view === "overview" && <Overview accounts={storedAccounts} entries={entries} payments={payments} total={totalBalance} available={availableBalance} income={income} expenses={expenses} pending={pending.length} onNavigate={setView} />}
 							{view === "accounts" && <Accounts accounts={storedAccounts} />}
+							{view === "cards" && <Cards accounts={storedAccounts} cards={cards} onCardsChange={setCards} />}
 							{view === "transactions" && <Transactions entries={entries} />}
 							{view === "transfer" && <TransferWizard accounts={storedAccounts} onComplete={loadAll} />}
 							{view === "scheduled" && <Scheduled payments={payments} onCancel={async (id) => { await cancelPayment(id); await loadAll(); }} onCreate={() => setView("transfer")} />}
@@ -296,6 +303,62 @@ function AccountTile({ account }: { account: Account }) {
 
 function Accounts({ accounts }: { accounts: Account[] }) {
 	return <div className="grid gap-5 lg:grid-cols-2">{accounts.map((account) => <AccountDetailsCard key={account.id} account={account} />)}</div>;
+}
+
+function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards: PaymentCard[]; onCardsChange: (cards: PaymentCard[]) => void }) {
+	const availableAccounts = accounts.filter((account) => account.status === "ACTIVE" && account.currency === "EUR" && !cards.some((card) => card.account_id === account.id && card.status === "ACTIVE"));
+	const [accountID, setAccountID] = useState("");
+	const [issued, setIssued] = useState<IssuedPaymentCard | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [feedback, setFeedback] = useState("");
+
+	useEffect(() => {
+		if (!availableAccounts.length) return;
+		if (!availableAccounts.some((account) => account.id === accountID)) setAccountID(availableAccounts[0].id);
+	}, [accountID, availableAccounts]);
+
+	useEffect(() => {
+		if (!issued) return;
+		const timeout = window.setTimeout(() => setIssued(null), 5 * 60 * 1000);
+		return () => window.clearTimeout(timeout);
+	}, [issued]);
+
+	const create = async () => {
+		if (!accountID) return;
+		setBusy(true);
+		setFeedback("");
+		try {
+			const result = await issueCard(accountID);
+			if (!result.response.ok) throw new Error("Die virtuelle Karte konnte nicht erstellt werden.");
+			setIssued(result.data);
+			onCardsChange([{ id: result.data.id, account_id: result.data.account_id, brand: result.data.brand, last4: result.data.last4, exp_month: result.data.exp_month, exp_year: result.data.exp_year, status: result.data.status }, ...cards]);
+		} catch (issueError) {
+			setFeedback(issueError instanceof Error ? issueError.message : "Die virtuelle Karte konnte nicht erstellt werden.");
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const copyCredentials = async () => {
+		if (!issued) return;
+		try {
+			await navigator.clipboard.writeText(`${formatCardNumber(issued.card_number)}\nCVC: ${issued.cvc}\nGültig bis: ${String(issued.exp_month).padStart(2, "0")}/${issued.exp_year}`);
+			setFeedback("Kartendaten wurden in die Zwischenablage kopiert.");
+		} catch {
+			setFeedback("Kartendaten konnten nicht kopiert werden.");
+		}
+	};
+
+	return <div className="space-y-6">
+		{issued && <Card className="overflow-hidden border-emerald-200"><div className="bg-gradient-to-br from-[#003b70] to-[#0874b9] p-6 text-white"><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Nur jetzt sichtbar</p><h2 className="mt-1 text-xl font-extrabold">Ihre virtuelle Karte</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">Notieren Sie die Daten jetzt. Kartennummer und CVC werden nicht gespeichert und nach fünf Minuten aus dieser Ansicht entfernt.</p><p className="mt-6 font-mono text-xl font-bold tracking-[.12em] sm:text-2xl">{formatCardNumber(issued.card_number)}</p><div className="mt-5 flex flex-wrap gap-5 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{issued.cvc}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(issued.exp_month).padStart(2, "0")}/{issued.exp_year}</strong></span></div></div><div className="flex flex-wrap gap-3 p-4"><button type="button" onClick={() => void copyCredentials()} className="bank-primary">Kartendaten kopieren</button><button type="button" onClick={() => setIssued(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Ausblenden</button></div></Card>}
+		<Card className="p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Virtuelle Karten</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Meine Karten</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Jede Karte ist mit einem EUR-Konto verbunden. Beim Bezahlen wird die Karte als Händler-Token genutzt; die CVC wird bei jeder Zahlung erneut geprüft.</p></div></div>{cards.length ? <div className="mt-6 grid gap-4 md:grid-cols-2">{cards.map((card) => <div key={card.id} className="rounded-2xl bg-gradient-to-br from-[#003b70] to-[#0874b9] p-5 text-white shadow-[0_12px_30px_rgba(0,59,112,.18)]"><div className="flex items-start justify-between"><span className="text-sm font-extrabold uppercase tracking-[.15em]">{card.brand}</span><span className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold">{card.status}</span></div><p className="mt-8 font-mono text-xl tracking-[.12em]">•••• •••• •••• {card.last4}</p><p className="mt-4 text-sm text-blue-100">Gültig bis {String(card.exp_month).padStart(2, "0")}/{card.exp_year}</p></div>)}</div> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Noch keine virtuelle Karte erstellt.</p>}</Card>
+		<Card className="p-5 sm:p-6"><h2 className="text-lg font-extrabold text-slate-900">Neue virtuelle Karte</h2><p className="mt-2 text-sm text-slate-500">Pro aktivem Konto kann eine Karte erstellt werden.</p>{availableAccounts.length ? <div className="mt-5 flex flex-col gap-3 sm:flex-row"><select aria-label="Konto für die virtuelle Karte" value={accountID} onChange={(event) => setAccountID(event.target.value)} className="bank-input flex-1">{availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.masked_iban}</option>)}</select><button type="button" onClick={() => void create()} disabled={busy || !accountID} className="bank-primary disabled:cursor-wait disabled:opacity-50">{busy ? "Wird erstellt…" : "Karte erstellen"}</button></div> : <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Sie benötigen ein weiteres aktives EUR-Konto, um eine zusätzliche Karte zu erstellen.</p>}</Card>
+		{feedback && <p role="status" className="text-sm text-slate-600">{feedback}</p>}
+	</div>;
+}
+
+function formatCardNumber(value: string) {
+	return value.replace(/(.{4})/g, "$1 ").trim();
 }
 
 function AccountDetailsCard({ account }: { account: Account }) {
@@ -631,6 +694,7 @@ function NavigationGlyph({ name }: { name: NavigationIcon }) {
 	const paths: Record<NavigationIcon, React.ReactNode> = {
 		home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
 		wallet: <><path d="M4 6.5h14a2 2 0 0 1 2 2v10H4a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2h13" /><path d="M16 11h6v5h-6a2.5 2.5 0 0 1 0-5Z" /></>,
+		card: <><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="M2.5 10h19M6.5 15h4" /></>,
 		activity: <><path d="M4 5h16M4 12h16M4 19h16" /><path d="m8 2-3 3 3 3m8 1 3 3-3 3m-8 1-3 3 3 3" /></>,
 		send: <><path d="m22 2-7 20-4-9-9-4 20-7Z" /><path d="M22 2 11 13" /></>,
 		calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,

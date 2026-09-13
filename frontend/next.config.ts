@@ -66,6 +66,10 @@ const nextConfig: NextConfig = {
           source: "/accounts/:path*",
           destination: `${apiBaseUrl}/accounts/:path*`,
         },
+		{
+			source: "/cards",
+			destination: `${apiBaseUrl}/cards`,
+		},
         // Proxy transfer endpoints
         {
           source: "/transfers",

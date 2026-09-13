@@ -17,6 +17,10 @@ var allowedProjectImports = map[string]map[string]bool{
 	"account":      {},
 	"identity":     {},
 	"notification": {},
+	"card": allowed(
+		"internal/account",
+		"internal/platform/database",
+	),
 	"ledger": allowed(
 		"internal/account",
 		"internal/ledger/domain",
@@ -56,6 +60,7 @@ var allowedProjectImports = map[string]map[string]bool{
 	),
 	"platform/httpapi": allowed(
 		"internal/account",
+		"internal/card",
 		"internal/identity",
 		"internal/ledger",
 		"internal/merchant",
@@ -141,7 +146,7 @@ func TestModuleDependencyRules(t *testing.T) {
 
 func TestInternalPackageRootsAreIntentional(t *testing.T) {
 	assertOnlyDirectories(t, "..", map[string]bool{
-		"account": true, "architecture": true, "identity": true,
+		"account": true, "architecture": true, "card": true, "identity": true,
 		"ledger": true, "merchant": true, "notification": true, "payment": true, "platform": true,
 	})
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
