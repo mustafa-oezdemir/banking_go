@@ -374,6 +374,8 @@ func main() {
 	r.Post("/internal/customers/provision", h.ProvisionCustomerInternal)
 	r.Put("/internal/customers/{id}/session-version", h.SyncCustomerSessionVersionInternal)
 	r.Post("/merchant/payment-intents", h.CreateMerchantPaymentIntent)
+	r.Post("/merchant/cards/tokenize", h.TokenizeMerchantCard)
+	r.Post("/merchant/payment-intents/{id}/card-approve", h.ApproveMerchantCardPayment)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
@@ -385,6 +387,7 @@ func main() {
 		r.Use(jwtauth.Verifier(api.TokenAuth))
 		r.Use(jwtauth.Authenticator(api.TokenAuth))
 		r.Use(api.RequireActiveSession(store))
+		paymentRateLimit := api.NewIPRateLimiter(20, time.Minute)
 
 		r.Get("/session", h.Session)
 		r.Get("/profile", h.GetProfile)
@@ -394,6 +397,8 @@ func main() {
 		r.Get("/accounts/{id}", h.GetAccount)
 		r.Put("/accounts/{id}", h.UpdateAccount)
 		r.Delete("/accounts/{id}", h.DeleteAccount)
+		r.Get("/cards", h.ListCards)
+		r.With(paymentRateLimit).Post("/cards", h.IssueCard)
 		r.Post("/transfers", h.Transfer)
 		r.Get("/accounts/{id}/entries", h.GetEntries)
 		r.Get("/accounts/{id}/transactions", h.ListAccountTransactions)
@@ -401,7 +406,6 @@ func main() {
 		r.Get("/transactions/{id}", h.GetTransactions)
 
 		vopRateLimit := api.NewIPRateLimiter(30, time.Minute)
-		paymentRateLimit := api.NewIPRateLimiter(20, time.Minute)
 		r.With(vopRateLimit).Post("/payees/verify", h.VerifyPayee)
 		r.With(paymentRateLimit).Post("/payments", h.CreatePayment)
 		r.Get("/payments", h.ListPayments)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
+	"github.com/mustafa-oezdemir/banking_go/internal/card"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
 	"github.com/mustafa-oezdemir/banking_go/internal/merchant"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
@@ -32,6 +34,7 @@ type Handler struct {
 	profiles  *account.ProfileService
 	store     *db.Store
 	notifier  notification.Sender
+	cards     *card.Service
 }
 
 func validateAccountName(rawName string) (string, error) {
@@ -68,6 +71,7 @@ func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 	return &Handler{
 		ledger: ledgerService, payments: paymentService, merchants: merchant.NewService(store, paymentService),
 		profiles: account.NewProfileService(store), store: store, notifier: notification.NoopSender{},
+		cards: card.NewService(store, os.Getenv("CARD_DATA_KEY")),
 	}
 }
 
@@ -77,6 +81,7 @@ func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payme
 	return &Handler{
 		ledger: ledgerService, payments: paymentService, profiles: account.NewProfileService(store),
 		merchants: merchant.NewService(store, paymentService), store: store, notifier: notification.NoopSender{},
+		cards: card.NewService(store, os.Getenv("CARD_DATA_KEY")),
 	}
 }
 
