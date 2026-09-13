@@ -107,7 +107,7 @@ cd banking_go
 .\start.ps1
 ```
 
-This starts the frontend, backend, and PostgreSQL. Open [http://localhost:3000](http://localhost:3000).
+This starts the frontend, backend, and PostgreSQL. Open [http://localhost:3003](http://localhost:3003).
 
 ### Frontend development mode
 
@@ -140,7 +140,7 @@ BACKEND_API_URL=https://your-backend-url.com
 yarn dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3003](http://localhost:3003).
 
 ---
 

@@ -31,7 +31,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     Browser["Browser"]
-    Frontend["Next.js frontend\nport 3000"]
+    Frontend["Next.js frontend\nport 3003"]
     Gateway["Gateway\nGo edge router"]
     Identity["Identity service\nGo/Chi port 8081"]
     API["Banking API\nGo/Chi"]

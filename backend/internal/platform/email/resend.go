@@ -21,7 +21,7 @@ import (
 const (
 	defaultResendEndpoint = "https://api.resend.com/"
 	defaultFromAddress    = "Pehlione DemoBank <banking@pehlione.com>"
-	defaultFrontendURL    = "http://localhost:3000"
+	defaultFrontendURL    = "http://localhost:3003"
 )
 
 // Config contains Resend delivery settings.

@@ -28,7 +28,7 @@ services:
       DB_PASSWORD: ${BANKING_DB_PASSWORD:?BANKING_DB_PASSWORD must be set in .env}
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3003,http://127.0.0.1:3003}
       DEMO_SEED: ${DEMO_SEED:-false}
       DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
@@ -41,7 +41,7 @@ services:
       RABBITMQ_RETRY_DELAY: ${RABBITMQ_RETRY_DELAY:-5s}
       RABBITMQ_MAX_RETRIES: ${RABBITMQ_MAX_RETRIES:-3}
       SWAGGER_BASE_URL: ${SWAGGER_BASE_URL:-http://localhost:${BACKEND_PORT:-8383}}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3003}
       PORT: ${PORT:-8080}
     ports:
       # Keep clear of common Hyper-V/WSL exclusions and desktop app ports.

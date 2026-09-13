@@ -28,7 +28,7 @@ func TestCreatePaymentRejectsMarkupWhenFrontendIsBypassed(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/payments", strings.NewReader(`{
 		"source_account_id":"`+uuid.NewString()+`",
 		"beneficiary_name":"<script>alert(1)</script>",
-		"beneficiary_iban":"DE89370400440532013000",
+		"beneficiary_iban":"DE89370400440532013003",
 		"amount":"1.00",
 		"transfer_type":"STANDARD",
 		"schedule_type":"IMMEDIATE"

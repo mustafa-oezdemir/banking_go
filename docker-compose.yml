@@ -119,7 +119,7 @@ services:
     image: grafana/grafana:11.6.0
     restart: unless-stopped
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "${GRAFANA_PORT:-3001}:3003"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in .env}
@@ -133,7 +133,7 @@ services:
       prometheus:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3003/api/health || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -156,7 +156,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3003}
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       OTEL_EXPORTER_OTLP_INSECURE: "true"
       NOTIFICATION_DB_HOST: postgres
@@ -234,7 +234,7 @@ services:
       DB_SSLMODE: ${DB_SSLMODE:-disable}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN must be set in .env}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:3003,http://127.0.0.1:3003}
       DEMO_SEED: ${DEMO_SEED:-false}
       DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-}
       ADMIN_SEED_EMAIL: ${ADMIN_SEED_EMAIL:-}
@@ -278,12 +278,12 @@ services:
       BACKEND_API_URL: http://gateway:8082
       NEXT_TELEMETRY_DISABLED: 1
     ports:
-      - "3000:3000"
+      - "3003:3003"
     depends_on:
       gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3003 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 12

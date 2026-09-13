@@ -12,7 +12,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[Local UI](http://localhost:3000) · [Gateway/API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Jaeger](http://localhost:16686) · [Grafana](http://localhost:3001) · [Prometheus](http://localhost:9090) · [Security Report](SECURITY_PENTEST_REPORT.md)
+[Local UI](http://localhost:3003) · [Gateway/API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Jaeger](http://localhost:16686) · [Grafana](http://localhost:3001) · [Prometheus](http://localhost:9090) · [Security Report](SECURITY_PENTEST_REPORT.md)
 
 </div>
 
@@ -95,7 +95,7 @@ docker compose up --build
 
 | Service | Local URL |
 | --- | --- |
-| Banking UI | [localhost:3000](http://localhost:3000) |
+| Banking UI | [localhost:3003](http://localhost:3003) |
 | API health | [localhost:8383/health](http://localhost:8383/health) |
 | Swagger UI | [localhost:8383/swagger/index.html](http://localhost:8383/swagger/index.html) |
 | MailHog inbox | [localhost:8425](http://localhost:8425) |
@@ -208,7 +208,7 @@ RABBITMQ_RETRY_DELAY=5s
 RABBITMQ_MAX_RETRIES=3
 RESEND_API_KEY=re_...
 MAIL_FROM=Pehlione DemoBank <banking@pehlione.com>
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:3003
 ```
 
 When `SMTP_HOST` is configured in Notification it takes precedence over Resend. The sender domain in `MAIL_FROM` must be verified in Resend with its SPF and DKIM records. Never commit provider credentials. RabbitMQ retry queues handle transient delivery failures, while malformed and exhausted events go to `notification.payment.dlq`. Financial commits never wait for RabbitMQ or the provider. Delivery is at least once—not exactly once; event IDs suppress normal duplicate broker deliveries, but a provider-accepted email immediately before a process crash may still be resent.

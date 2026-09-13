@@ -267,7 +267,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontendPath "node_modules/next/pac
 
 Write-Host ""
 Write-Host "Backend ve PostgreSQL hazir; frontend gelistirme sunucusu baslatiliyor." -ForegroundColor Green
-Write-Host "Frontend : http://localhost:3000"
+Write-Host "Frontend : http://localhost:3003"
 Write-Host "Backend  : http://localhost:$backendDevPort"
 Write-Host "Swagger  : http://localhost:$backendDevPort/swagger/index.html"
 Write-Host "MailHog  : http://localhost:8425"

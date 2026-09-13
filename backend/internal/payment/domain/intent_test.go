@@ -12,7 +12,7 @@ import (
 func TestEquivalentIntentProtectsIdempotency(t *testing.T) {
 	base := Intent{
 		SourceAccountID: uuid.New(), BeneficiaryName: "Anna Müller",
-		BeneficiaryIBAN: "DE89370400440532013000", BeneficiaryBIC: "DEMODEFFXXX",
+		BeneficiaryIBAN: "DE89370400440532013003", BeneficiaryBIC: "DEMODEFFXXX",
 		Amount: decimal.RequireFromString("10.00"), ScheduleType: "SCHEDULED",
 		Purpose: "Miete", CreditorReference: "RF18539007547034",
 		RequestedExecution: time.Date(2026, time.August, 12, 9, 30, 0, 0, time.UTC),

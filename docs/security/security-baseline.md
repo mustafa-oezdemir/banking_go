@@ -81,7 +81,7 @@ Input controls are uneven: profile fields and several payment fields have HTML `
 
 | Interface | Current exposure | Notes |
 | --- | --- | --- |
-| Frontend | host port `3000` | intended browser interface |
+| Frontend | host port `3003` | intended browser interface |
 | Gateway | host port `${BACKEND_PORT:-8383}` | intended public API edge |
 | Banking API | Compose-internal only | public-like routes still exist in its process; intended path is Gateway |
 | Identity Service | Compose-internal only | intended path is Gateway |

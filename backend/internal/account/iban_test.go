@@ -30,10 +30,10 @@ func TestValidateIBAN(t *testing.T) {
 		valid bool
 	}{
 		{name: "known German IBAN", iban: "DE89 3704 0044 0532 0130 00", valid: true},
-		{name: "normalized lowercase", iban: "de89370400440532013000", valid: true},
+		{name: "normalized lowercase", iban: "de89370400440532013003", valid: true},
 		{name: "bad checksum", iban: "DE88 3704 0044 0532 0130 00", valid: false},
 		{name: "bad German length", iban: "DE8937040044053201300", valid: false},
-		{name: "illegal character", iban: "DE89-70400440532013000", valid: false},
+		{name: "illegal character", iban: "DE89-70400440532013003", valid: false},
 		{name: "empty", iban: "", valid: false},
 	}
 	for _, tt := range tests {
@@ -49,7 +49,7 @@ func TestValidateIBAN(t *testing.T) {
 }
 
 func TestMaskIBAN(t *testing.T) {
-	assert.Equal(t, "DE89**************3000", MaskIBAN("DE89370400440532013000"))
+	assert.Equal(t, "DE89**************3003", MaskIBAN("DE89370400440532013003"))
 }
 
 func TestGermanDemoIBANForAccount(t *testing.T) {
