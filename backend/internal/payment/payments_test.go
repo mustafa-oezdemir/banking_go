@@ -193,7 +193,7 @@ func TestFailedPaymentWritesFailureOutboxEvent(t *testing.T) {
 func TestValidatePaymentInputMoneyRules(t *testing.T) {
 	base := CreatePaymentInput{
 		OwnerID: uuid.New(), SourceAccountID: uuid.New(), BeneficiaryName: "Anna Müller",
-		BeneficiaryIBAN: "DE89370400440532013003", Amount: "12.34",
+		BeneficiaryIBAN: "DE89370400440532013000", Amount: "12.34",
 		TransferType: PaymentStandard, ScheduleType: ScheduleImmediate,
 		IdempotencyKey: "test-key-123", RequestedExecution: time.Now(),
 	}
@@ -213,7 +213,7 @@ func TestSamePaymentIntentRejectsIdempotencyPayloadChange(t *testing.T) {
 	execution := time.Date(2026, time.August, 12, 9, 30, 0, 0, time.UTC)
 	input := CreatePaymentInput{
 		SourceAccountID: uuid.New(), BeneficiaryName: "Anna Müller",
-		BeneficiaryIBAN: "DE89370400440532013003", BeneficiaryBIC: "DEMODEFFXXX",
+		BeneficiaryIBAN: "DE89370400440532013000", BeneficiaryBIC: "DEMODEFFXXX",
 		ScheduleType: ScheduleScheduled, TransferType: PaymentStandard,
 		Purpose: "Miete", CreditorReference: "RF18539007547034",
 		RequestedExecution: execution,
@@ -261,7 +261,7 @@ func TestStandingOrderRecurrence(t *testing.T) {
 func TestPaymentValidationRejectsMarkupPayload(t *testing.T) {
 	_, err := validatePaymentInput(CreatePaymentInput{
 		OwnerID: uuid.New(), SourceAccountID: uuid.New(), BeneficiaryName: "<svg/onload=alert(1)>",
-		BeneficiaryIBAN: "DE89370400440532013003", Amount: "1.00", TransferType: PaymentStandard,
+		BeneficiaryIBAN: "DE89370400440532013000", Amount: "1.00", TransferType: PaymentStandard,
 		ScheduleType: ScheduleImmediate, IdempotencyKey: "payment-validation-test",
 	}, time.Now().UTC())
 	assert.ErrorIs(t, err, ErrInvalidPaymentInput)
