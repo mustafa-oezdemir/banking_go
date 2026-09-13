@@ -21,6 +21,11 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/account",
 		"internal/ledger/domain",
 	),
+	"merchant": allowed(
+		"internal/ledger",
+		"internal/payment",
+		"internal/platform/database",
+	),
 	"payment": allowed(
 		"internal/account",
 		"internal/ledger",
@@ -53,6 +58,7 @@ var allowedProjectImports = map[string]map[string]bool{
 		"internal/account",
 		"internal/identity",
 		"internal/ledger",
+		"internal/merchant",
 		"internal/notification",
 		"internal/payment",
 		"internal/platform/database",
@@ -136,7 +142,7 @@ func TestModuleDependencyRules(t *testing.T) {
 func TestInternalPackageRootsAreIntentional(t *testing.T) {
 	assertOnlyDirectories(t, "..", map[string]bool{
 		"account": true, "architecture": true, "identity": true,
-		"ledger": true, "notification": true, "payment": true, "platform": true,
+		"ledger": true, "merchant": true, "notification": true, "payment": true, "platform": true,
 	})
 	assertOnlyDirectories(t, filepath.Join("..", "platform"), map[string]bool{
 		"bankingclient": true, "bootstrap": true, "database": true, "email": true, "gateway": true, "httpapi": true,
@@ -294,7 +300,7 @@ func ownerForPath(path string) string {
 
 func isBusinessModule(owner string) bool {
 	switch owner {
-	case "account", "identity", "ledger", "notification", "payment":
+	case "account", "identity", "ledger", "merchant", "notification", "payment":
 		return true
 	default:
 		return false

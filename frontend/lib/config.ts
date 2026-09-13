@@ -43,6 +43,8 @@ export const API_ENDPOINTS = {
 	PAYMENT: (paymentId: string) => `/payments/${paymentId}`,
 	CONFIRM_PAYMENT: (paymentId: string) => `/payments/${paymentId}/confirm`,
 	CANCEL_PAYMENT: (paymentId: string) => `/payments/${paymentId}/cancel`,
+	MERCHANT_PAYMENT_INTENT: (intentId: string) => `/merchant/payment-intents/${intentId}`,
+	APPROVE_MERCHANT_PAYMENT_INTENT: (intentId: string) => `/merchant/payment-intents/${intentId}/approve`,
 	STANDING_ORDERS: "/standing-orders",
 	STANDING_ORDER: (orderId: string) => `/standing-orders/${orderId}`,
 	BENEFICIARIES: "/beneficiaries",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { forgotPassword, login, register } from "@/lib/api";
 import { emailError, normalizePlainText, passwordError, plainTextError } from "@/lib/inputValidation";
 import { useAuthStore } from "@/lib/store/authStore";
@@ -10,6 +10,7 @@ type AuthMode = "login" | "register" | "forgot";
 
 export default function AuthPage() {
 	const router = useRouter();
+	const searchParams = useSearchParams();
 	const setAuthenticated = useAuthStore((state) => state.setAuthenticated);
 	const authenticated = useAuthStore((state) => state.isAuthenticated());
 	const hydrated = useAuthStore((state) => state.isHydrated);
@@ -17,10 +18,11 @@ export default function AuthPage() {
 	const [loading, setLoading] = useState(false);
 	const [message, setMessage] = useState("");
 	const [success, setSuccess] = useState(false);
+	const continueTo = safeContinuePath(searchParams.get("continue"));
 
 	useEffect(() => {
-		if (hydrated && authenticated) router.replace("/dashboard");
-	}, [authenticated, hydrated, router]);
+		if (hydrated && authenticated) router.replace(continueTo);
+	}, [authenticated, continueTo, hydrated, router]);
 
 	const changeMode = (nextMode: AuthMode) => {
 		setMode(nextMode);
@@ -66,7 +68,7 @@ export default function AuthPage() {
 				throw new Error(apiError);
 			}
 			setAuthenticated(email);
-			router.replace("/dashboard");
+			router.replace(continueTo);
 		} catch (error) {
 			setMessage(error instanceof Error ? error.message : "Verbindung fehlgeschlagen.");
 		} finally {
@@ -124,4 +126,9 @@ export default function AuthPage() {
 			</section>
 		</div>
 	</main>;
+}
+
+function safeContinuePath(value: string | null): string {
+	// Permit only the merchant approval route; reject absolute or arbitrary redirects.
+	return value && /^\/pay\/[0-9a-f-]{36}$/i.test(value) ? value : "/dashboard";
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mustafa-oezdemir/banking_go/internal/account"
 	"github.com/mustafa-oezdemir/banking_go/internal/ledger"
+	"github.com/mustafa-oezdemir/banking_go/internal/merchant"
 	"github.com/mustafa-oezdemir/banking_go/internal/notification"
 	"github.com/mustafa-oezdemir/banking_go/internal/payment"
 	db "github.com/mustafa-oezdemir/banking_go/internal/platform/database"
@@ -25,11 +26,12 @@ import (
 
 // Handler serves HTTP requests backed by the ledger and store layers.
 type Handler struct {
-	ledger   *ledger.Service
-	payments *payment.Service
-	profiles *account.ProfileService
-	store    *db.Store
-	notifier notification.Sender
+	ledger    *ledger.Service
+	payments  *payment.Service
+	merchants *merchant.Service
+	profiles  *account.ProfileService
+	store     *db.Store
+	notifier  notification.Sender
 }
 
 func validateAccountName(rawName string) (string, error) {
@@ -62,9 +64,10 @@ func parseQueryInt32(raw string) (int32, error) {
 
 // NewHandler constructs a Handler with the required service and persistence dependencies.
 func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
+	paymentService := payment.NewService(store, nil)
 	return &Handler{
-		ledger: ledgerService, payments: payment.NewService(store, nil), profiles: account.NewProfileService(store),
-		store: store, notifier: notification.NoopSender{},
+		ledger: ledgerService, payments: paymentService, merchants: merchant.NewService(store, paymentService),
+		profiles: account.NewProfileService(store), store: store, notifier: notification.NoopSender{},
 	}
 }
 
@@ -73,7 +76,7 @@ func NewHandler(ledgerService *ledger.Service, store *db.Store) *Handler {
 func NewHandlerWithPayments(ledgerService *ledger.Service, paymentService *payment.Service, store *db.Store) *Handler {
 	return &Handler{
 		ledger: ledgerService, payments: paymentService, profiles: account.NewProfileService(store),
-		store: store, notifier: notification.NoopSender{},
+		merchants: merchant.NewService(store, paymentService), store: store, notifier: notification.NoopSender{},
 	}
 }
 

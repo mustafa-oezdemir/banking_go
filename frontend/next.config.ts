@@ -85,6 +85,10 @@ const nextConfig: NextConfig = {
 			destination: `${apiBaseUrl}/payments`,
 		},
 		{
+			source: "/merchant/:path*",
+			destination: `${apiBaseUrl}/merchant/:path*`,
+		},
+		{
 			source: "/payees/:path*",
 			destination: `${apiBaseUrl}/payees/:path*`,
 		},

@@ -129,6 +129,20 @@ export interface Payment {
 	demo: true;
 }
 
+export interface MerchantPaymentIntent {
+	payment_intent_id: string;
+	merchant_id: string;
+	merchant_name: string;
+	beneficiary_iban: string;
+	merchant_reference: string;
+	amount: string;
+	currency: "EUR";
+	status: "AWAITING_CUSTOMER" | "PROCESSING" | "BOOKED" | "FAILED" | "CANCELLED" | "EXPIRED";
+	payment_id?: string;
+	return_url: string;
+	expires_at: string;
+}
+
 export interface StandingOrder {
 	id: string;
 	source_account_id: string;

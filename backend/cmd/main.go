@@ -373,6 +373,7 @@ func main() {
 	// private in Compose and protected by an independent service token.
 	r.Post("/internal/customers/provision", h.ProvisionCustomerInternal)
 	r.Put("/internal/customers/{id}/session-version", h.SyncCustomerSessionVersionInternal)
+	r.Post("/merchant/payment-intents", h.CreateMerchantPaymentIntent)
 
 	r.Get("/swagger/*", httpSwagger.Handler(
 		httpSwagger.URL("/swagger/doc.json"),
@@ -407,6 +408,8 @@ func main() {
 		r.Get("/payments/{id}", h.GetPayment)
 		r.With(paymentRateLimit).Post("/payments/{id}/confirm", h.ConfirmPayment)
 		r.Post("/payments/{id}/cancel", h.CancelPayment)
+		r.Get("/merchant/payment-intents/{id}", h.GetMerchantPaymentIntent)
+		r.With(paymentRateLimit).Post("/merchant/payment-intents/{id}/approve", h.ApproveMerchantPaymentIntent)
 		r.Post("/standing-orders", h.CreateStandingOrder)
 		r.Get("/standing-orders", h.ListStandingOrders)
 		r.Patch("/standing-orders/{id}", h.UpdateStandingOrder)

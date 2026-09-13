@@ -21,6 +21,7 @@ import type {
 	AdminOverview,
 	CustomerProfile,
 	CustomerProfileUpdate,
+	MerchantPaymentIntent,
 } from "@/lib/types";
 
 /**
@@ -339,6 +340,19 @@ export async function confirmPayment(paymentId: string, acceptVoPMismatch: boole
 
 export async function cancelPayment(paymentId: string): Promise<ApiResponse<Payment>> {
 	return request<Payment>(API_ENDPOINTS.CANCEL_PAYMENT(paymentId), { method: "POST" });
+}
+
+/** Load an opaque merchant checkout instruction after the customer is authenticated. */
+export async function getMerchantPaymentIntent(intentId: string): Promise<ApiResponse<MerchantPaymentIntent>> {
+	return request<MerchantPaymentIntent>(API_ENDPOINTS.MERCHANT_PAYMENT_INTENT(intentId));
+}
+
+/** Approve a merchant instruction; recipient, amount, and reference are server-derived. */
+export async function approveMerchantPaymentIntent(intentId: string, sourceAccountId: string): Promise<ApiResponse<MerchantPaymentIntent>> {
+	return request<MerchantPaymentIntent>(API_ENDPOINTS.APPROVE_MERCHANT_PAYMENT_INTENT(intentId), {
+		method: "POST",
+		body: JSON.stringify({ source_account_id: sourceAccountId, confirm_demo: true }),
+	});
 }
 
 export async function getStandingOrders(): Promise<ApiResponse<StandingOrder[]>> {
