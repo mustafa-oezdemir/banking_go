@@ -96,7 +96,7 @@ services:
     image: prom/prometheus:v3.7.3
     restart: unless-stopped
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${PROMETHEUS_PORT:-9093}:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/rules:/etc/prometheus/rules:ro

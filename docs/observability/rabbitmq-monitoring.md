@@ -19,7 +19,7 @@ The focused set gives the payment-notification path enough visibility without cr
 
 Start the stack with `docker compose up --build`. Then open:
 
-- [Prometheus targets](http://localhost:9090/targets) to check both RabbitMQ jobs are `UP`.
+- [Prometheus targets](http://localhost:9093/targets) to check both RabbitMQ jobs are `UP`.
 - [Grafana](http://localhost:3001) and sign in with `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from your ignored `.env` file.
 
 Grafana provisions:

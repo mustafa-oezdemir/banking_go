@@ -12,7 +12,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-[Local UI](http://localhost:3003) · [Gateway/API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Jaeger](http://localhost:16686) · [Grafana](http://localhost:3001) · [Prometheus](http://localhost:9090) · [Security Report](SECURITY_PENTEST_REPORT.md)
+[Local UI](http://localhost:3003) · [Gateway/API Health](http://localhost:8383/health) · [Swagger](http://localhost:8383/swagger/index.html) · [Jaeger](http://localhost:16686) · [Grafana](http://localhost:3001) · [Prometheus](http://localhost:9093) · [Security Report](SECURITY_PENTEST_REPORT.md)
 
 </div>
 
@@ -101,7 +101,7 @@ docker compose up --build
 | MailHog inbox | [localhost:8425](http://localhost:8425) |
 | Jaeger traces | [localhost:16686](http://localhost:16686) |
 | Grafana dashboards | [localhost:3001](http://localhost:3001) |
-| Prometheus targets | [localhost:9090/targets](http://localhost:9090/targets) |
+| Prometheus targets | [localhost:9093/targets](http://localhost:9093/targets) |
 | PostgreSQL | `localhost:5433` |
 
 Stop the stack with `docker compose down`. Add `-v` only when you intentionally want to remove the local PostgreSQL volume.
