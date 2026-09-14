@@ -89,6 +89,30 @@ func (h *Handler) GetCardCredentials(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, revealed)
 }
 
+func (h *Handler) CancelCard(w http.ResponseWriter, r *http.Request) {
+	ownerID, cardID, ok := ownerAndPathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.cards.Cancel(r.Context(), ownerID, cardID); err != nil {
+		respondCardError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) DeleteCard(w http.ResponseWriter, r *http.Request) {
+	ownerID, cardID, ok := ownerAndPathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.cards.Delete(r.Context(), ownerID, cardID); err != nil {
+		respondCardError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) TokenizeMerchantCard(w http.ResponseWriter, r *http.Request) {
 	if !validMerchantAPIToken(r) {
 		respondError(w, http.StatusUnauthorized, "unauthorized")

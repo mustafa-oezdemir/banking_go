@@ -161,6 +161,14 @@ export async function getCardCredentials(cardId: string, signal?: AbortSignal): 
 	return request<PaymentCardCredentials>(API_ENDPOINTS.CARD_CREDENTIALS(cardId), { signal });
 }
 
+export async function cancelCard(cardId: string): Promise<ApiResponse<MessageResponse>> {
+	return request<MessageResponse>(API_ENDPOINTS.CANCEL_CARD(cardId), { method: "POST" });
+}
+
+export async function deleteCard(cardId: string): Promise<ApiResponse<MessageResponse>> {
+	return request<MessageResponse>(API_ENDPOINTS.CARD(cardId), { method: "DELETE" });
+}
+
 /**
  * Get the current HttpOnly-cookie session
  */

@@ -42,7 +42,7 @@ We selected option 3. The backend remains one deployable banking application, wi
 | `internal/account` | IBAN rules and customer profile/name invariants | IBAN generation/validation/masking and normalized profile input |
 | `internal/ledger` | EUR money parsing, account balance rules, double-entry posting, reconciliation, and local transfers | `ledger.Service` operations and stable financial errors |
 | `internal/payment` | VoP, payment intent/idempotency, payment state transitions, booking, scheduled processing, standing orders, and owner-scoped event signals | `payment.Service`, payment commands/results, worker operations, and `EventHub` |
-| `internal/card` | Virtual-card lifecycle, opaque merchant tokenization, and per-payment CVC validation for a linked account | `card.Service`, issue/tokenize/authorize results, no raw PAN or CVC persistence |
+| `internal/card` | Banking-owned virtual-card lifecycle, encrypted credentials, opaque merchant tokenization, and per-payment CVC validation | `card.Service` issue/list/reveal/cancel/delete/tokenize/authorize behavior; no card credentials cross into E-Commerce storage |
 | `internal/notification` | Provider-neutral notification message contracts | `Sender` port and no-op implementation |
 | `internal/platform/httpapi` | Chi routing, JWT/cookie/session middleware, CSRF/CORS/security headers, HTTP DTOs, mapping, and response semantics | HTTP adapter only |
 | `internal/platform/database` | Concrete PostgreSQL store, serializable unit of work, retries, profile/reset/admin persistence | Infrastructure adapter used during composition and the Phase 1 transition |

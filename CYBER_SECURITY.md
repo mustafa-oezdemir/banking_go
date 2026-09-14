@@ -321,6 +321,19 @@ yarn build
 | Docker/secret/deployment | Dockerfile'lar, Compose dosyaları, `.env.example` |
 | CI güvenlik kapısı | `.github/workflows/*.yml`, `.github/dependabot.yml` |
 
+## 15. Sanal kart güvenliği
+
+| Kontrol | Uygulama ve dosya |
+| --- | --- |
+| PAN ve CVC'nin şifreli saklanması | AES-256-GCM: `backend/internal/card/service.go`; kolonlar: migration `000018_secure_card_credentials_and_lifecycle` |
+| Müşteri izolasyonu | Owner-scoped sorgular: `backend/internal/platform/database/cards.go`; kimlik doğrulamalı handler: `backend/internal/platform/httpapi/card_handler.go` |
+| Kart bilgilerinin görüntülenmesi | `GET /cards/{id}/credentials`; `no-store` başlıkları ve rate limit; arayüzde 60 saniye sonra otomatik gizleme |
+| E-Commerce veri minimizasyonu | E-Commerce'e PAN/CVC yerine merchant-bound opaque token verilir; CVC her ödemede Banking tarafından tekrar doğrulanır |
+| Kart yaşam döngüsü | Kart iptali kalıcıdır; yalnızca iptal edilmiş kart silinebilir; iptal edilen kartla ödeme yapılamaz |
+| Anahtar yönetimi | `CARD_DATA_KEY` repoya yazılmaz. Üretimde secret manager/HSM, erişim denetimi ve rotasyon gerekir |
+
+Ayrıntılı karar ve üretim sınırlamaları `docs/adr/ADR-016-banking-owned-virtual-card-data.md` belgesindedir.
+
 ## İlgili belgeler
 
 - `SECURITY.md` — güvenlik politikası ve bildirim süreci.

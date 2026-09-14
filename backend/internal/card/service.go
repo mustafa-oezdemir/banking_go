@@ -2,6 +2,8 @@ package card
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -84,11 +86,24 @@ func (service *Service) Issue(ctx context.Context, ownerID, accountID uuid.UUID)
 	if err != nil || !sepa.CustomerCanOperate(ownerID, account.OwnerID.UUID, account.OwnerID.Valid, account.IsSystem) || account.Status != "ACTIVE" || account.Currency != "EUR" {
 		return IssuedCard{}, ErrCardUnavailable
 	}
-	// Multiple virtual cards may be attached to the same active EUR account.
-	// Each card gets independent credentials and a separate merchant token.
 	cardID := uuid.New()
-	pan, cvc := service.deriveCredentials(cardID)
+	pan, err := generatePAN()
+	if err != nil {
+		return IssuedCard{}, err
+	}
+	cvc, err := randomDigits(3)
+	if err != nil {
+		return IssuedCard{}, err
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(cvc), bcrypt.DefaultCost)
+	if err != nil {
+		return IssuedCard{}, err
+	}
+	encryptedPAN, err := service.encrypt(pan)
+	if err != nil {
+		return IssuedCard{}, err
+	}
+	encryptedCVC, err := service.encrypt(cvc)
 	if err != nil {
 		return IssuedCard{}, err
 	}
@@ -96,7 +111,8 @@ func (service *Service) Issue(ctx context.Context, ownerID, accountID uuid.UUID)
 	card, err := service.store.CreatePaymentCard(ctx, db.PaymentCard{
 		ID:      cardID,
 		OwnerID: ownerID, AccountID: accountID, PANFingerprint: service.fingerprint("pan:" + pan), LastFour: pan[len(pan)-4:], Brand: "visa",
-		ExpMonth: int(expires.Month()), ExpYear: expires.Year(), CVCHash: string(hash), CredentialVersion: 1, Status: "ACTIVE",
+		ExpMonth: int(expires.Month()), ExpYear: expires.Year(), CVCHash: string(hash), CredentialVersion: 2,
+		EncryptedPAN: encryptedPAN, EncryptedCVC: encryptedCVC, Status: "ACTIVE",
 	})
 	if err != nil {
 		return IssuedCard{}, err
@@ -111,10 +127,24 @@ func (service *Service) Reveal(ctx context.Context, ownerID, cardID uuid.UUID) (
 		return RevealedCard{}, ErrCardCredentialsUnavailable
 	}
 	stored, err := service.store.GetPaymentCardByIDAndOwner(ctx, cardID, ownerID)
-	if err != nil || stored.CredentialVersion != 1 {
+	if err != nil || stored.Status != "ACTIVE" {
 		return RevealedCard{}, ErrCardCredentialsUnavailable
 	}
-	pan, cvc := service.deriveCredentials(stored.ID)
+	var pan, cvc string
+	switch stored.CredentialVersion {
+	case 1:
+		pan, cvc = service.deriveCredentials(stored.ID)
+	case 2:
+		pan, err = service.decrypt(stored.EncryptedPAN)
+		if err == nil {
+			cvc, err = service.decrypt(stored.EncryptedCVC)
+		}
+		if err != nil {
+			return RevealedCard{}, ErrCardCredentialsUnavailable
+		}
+	default:
+		return RevealedCard{}, ErrCardCredentialsUnavailable
+	}
 	if !hmac.Equal(stored.PANFingerprint, service.fingerprint("pan:"+pan)) || bcrypt.CompareHashAndPassword([]byte(stored.CVCHash), []byte(cvc)) != nil {
 		return RevealedCard{}, ErrCardCredentialsUnavailable
 	}
@@ -128,6 +158,26 @@ func (service *Service) List(ctx context.Context, ownerID uuid.UUID) ([]db.Payme
 	return service.store.ListPaymentCardsByOwner(ctx, ownerID)
 }
 
+func (service *Service) Cancel(ctx context.Context, ownerID, cardID uuid.UUID) error {
+	if !service.ready() || ownerID == uuid.Nil || cardID == uuid.Nil {
+		return ErrCardUnavailable
+	}
+	if err := service.store.CancelPaymentCard(ctx, ownerID, cardID); err != nil {
+		return ErrCardUnavailable
+	}
+	return nil
+}
+
+func (service *Service) Delete(ctx context.Context, ownerID, cardID uuid.UUID) error {
+	if !service.ready() || ownerID == uuid.Nil || cardID == uuid.Nil {
+		return ErrCardUnavailable
+	}
+	if err := service.store.DeletePaymentCard(ctx, ownerID, cardID); err != nil {
+		return ErrCardUnavailable
+	}
+	return nil
+}
+
 func (service *Service) Tokenize(ctx context.Context, merchantID, pan, cvc string, month, year int) (TokenizedCard, error) {
 	pan, cvc, merchantID = normalizePAN(pan), strings.TrimSpace(cvc), strings.ToLower(strings.TrimSpace(merchantID))
 	if !service.ready() || !validPAN(pan) || !validCVC(cvc) {
@@ -138,7 +188,7 @@ func (service *Service) Tokenize(ctx context.Context, merchantID, pan, cvc strin
 		return TokenizedCard{}, ErrInvalidCard
 	}
 	stored, err := service.store.GetPaymentCardByFingerprint(ctx, service.fingerprint("pan:"+pan))
-	if err != nil || !service.usable(stored, month, year) || bcrypt.CompareHashAndPassword([]byte(stored.CVCHash), []byte(cvc)) != nil {
+	if err != nil || !service.usable(stored, month, year) || !service.matchesCVC(stored, cvc) {
 		return TokenizedCard{}, ErrInvalidCard
 	}
 	rawToken := make([]byte, 32)
@@ -161,7 +211,7 @@ func (service *Service) Authorize(ctx context.Context, merchantID, token, cvc st
 		return AuthorizedCard{}, ErrInvalidCard
 	}
 	stored, err := service.store.GetCardByMerchantToken(ctx, merchantID, service.fingerprint("token:"+token))
-	if err != nil || !service.usable(stored.Card, stored.Card.ExpMonth, stored.Card.ExpYear) || bcrypt.CompareHashAndPassword([]byte(stored.Card.CVCHash), []byte(cvc)) != nil {
+	if err != nil || !service.usable(stored.Card, stored.Card.ExpMonth, stored.Card.ExpYear) || !service.matchesCVC(stored.Card, cvc) {
 		return AuthorizedCard{}, ErrInvalidCard
 	}
 	if err := service.store.TouchMerchantCardToken(ctx, stored.ID); err != nil {
@@ -179,6 +229,55 @@ func (service *Service) fingerprint(value string) []byte {
 	mac := hmac.New(sha256.New, service.key)
 	_, _ = mac.Write([]byte(value))
 	return mac.Sum(nil)
+}
+
+func (service *Service) matchesCVC(stored db.PaymentCard, candidate string) bool {
+	if stored.CredentialVersion == 2 {
+		value, err := service.decrypt(stored.EncryptedCVC)
+		return err == nil && subtle.ConstantTimeCompare([]byte(value), []byte(candidate)) == 1
+	}
+	return bcrypt.CompareHashAndPassword([]byte(stored.CVCHash), []byte(candidate)) == nil
+}
+
+func (service *Service) encryptionKey() []byte {
+	sum := sha256.Sum256(append([]byte("card-encryption-v1:"), service.key...))
+	return sum[:]
+}
+
+func (service *Service) encrypt(plainText string) ([]byte, error) {
+	block, err := aes.NewCipher(service.encryptionKey())
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, []byte(plainText), nil), nil
+}
+
+func (service *Service) decrypt(cipherText []byte) (string, error) {
+	block, err := aes.NewCipher(service.encryptionKey())
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(cipherText) < gcm.NonceSize() {
+		return "", ErrCardCredentialsUnavailable
+	}
+	nonce, payload := cipherText[:gcm.NonceSize()], cipherText[gcm.NonceSize():]
+	plainText, err := gcm.Open(nil, nonce, payload, nil)
+	if err != nil {
+		return "", ErrCardCredentialsUnavailable
+	}
+	return string(plainText), nil
 }
 
 func (service *Service) deriveCredentials(cardID uuid.UUID) (string, string) {

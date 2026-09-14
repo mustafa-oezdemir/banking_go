@@ -33,6 +33,8 @@ export const API_ENDPOINTS = {
 	ACCOUNT: (accountId: string) => `/accounts/${accountId}`,
 	CARDS: "/cards",
 	CARD_CREDENTIALS: (cardId: string) => `/cards/${cardId}/credentials`,
+	CANCEL_CARD: (cardId: string) => `/cards/${cardId}/cancel`,
+	CARD: (cardId: string) => `/cards/${cardId}`,
   DEPOSIT: (accountId: string) => `/accounts/${accountId}/deposit`,
   WITHDRAW: (accountId: string) => `/accounts/${accountId}/withdraw`,
   TRANSFERS: "/transfers",

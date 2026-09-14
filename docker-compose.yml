@@ -290,7 +290,7 @@ services:
     ports:
       # Next.js listens on 3000 inside its production container; keep the
       # public Banking URL on 3003 for local development.
-      - "3003:3000"
+      - "${FRONTEND_PORT:-3003}:3000"
     depends_on:
       gateway:
         condition: service_healthy

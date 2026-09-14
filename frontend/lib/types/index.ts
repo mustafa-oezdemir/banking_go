@@ -83,7 +83,7 @@ export interface PaymentCard {
 	last4: string;
 	exp_month: number;
 	exp_year: number;
-	status: "ACTIVE" | "BLOCKED" | "EXPIRED";
+	status: "ACTIVE" | "BLOCKED" | "EXPIRED" | "CANCELLED";
 }
 
 /** Returned once when a virtual card is issued. Keep only in browser memory. */

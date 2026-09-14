@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import {
+	cancelCard,
 	cancelPayment,
 	createAccount,
+	deleteCard,
 	deleteStandingOrder,
 	getAccountTransactions,
 	getAccount,
@@ -353,6 +355,7 @@ function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards:
 	const [issued, setIssued] = useState<IssuedPaymentCard | null>(null);
 	const [revealed, setRevealed] = useState<PaymentCardCredentials | null>(null);
 	const [revealingCardID, setRevealingCardID] = useState("");
+	const [lifecycleCardID, setLifecycleCardID] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [feedback, setFeedback] = useState("");
 	const revealRequest = useRef<AbortController | null>(null);
@@ -444,10 +447,44 @@ function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards:
 		}
 	};
 
+	const cancelStoredCard = async (card: PaymentCard) => {
+		if (!window.confirm(`Karte •••• ${card.last4} dauerhaft kündigen?`)) return;
+		setLifecycleCardID(card.id);
+		setFeedback("");
+		try {
+			const result = await cancelCard(card.id);
+			if (!result.response.ok) throw new Error("Die Karte konnte nicht gekündigt werden.");
+			if (revealed?.id === card.id) setRevealed(null);
+			onCardsChange(cards.map((item) => item.id === card.id ? { ...item, status: "CANCELLED" } : item));
+			setFeedback("Die Karte wurde dauerhaft gekündigt.");
+		} catch (cancelError) {
+			setFeedback(cancelError instanceof Error ? cancelError.message : "Die Karte konnte nicht gekündigt werden.");
+		} finally {
+			setLifecycleCardID("");
+		}
+	};
+
+	const deleteStoredCard = async (card: PaymentCard) => {
+		if (!window.confirm(`Gekündigte Karte •••• ${card.last4} endgültig löschen?`)) return;
+		setLifecycleCardID(card.id);
+		setFeedback("");
+		try {
+			const result = await deleteCard(card.id);
+			if (!result.response.ok) throw new Error("Die Karte konnte nicht gelöscht werden.");
+			onCardsChange(cards.filter((item) => item.id !== card.id));
+			setFeedback("Die Karte wurde gelöscht.");
+		} catch (deleteError) {
+			setFeedback(deleteError instanceof Error ? deleteError.message : "Die Karte konnte nicht gelöscht werden.");
+		} finally {
+			setLifecycleCardID("");
+		}
+	};
+
 	return <div className="space-y-6">
-		{issued && <Card className="overflow-hidden border-emerald-200"><div className="bg-gradient-to-br from-[#003b70] to-[#0874b9] p-6 text-white"><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Nur 60 Sekunden sichtbar</p><h2 className="mt-1 text-xl font-extrabold">Ihre virtuelle Karte</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">Kartennummer und CVC werden nicht gespeichert und nach 60 Sekunden aus dieser Ansicht entfernt.</p><p className="mt-6 font-mono text-xl font-bold tracking-[.12em] sm:text-2xl">{formatCardNumber(issued.card_number)}</p><div className="mt-5 flex flex-wrap gap-5 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{issued.cvc}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(issued.exp_month).padStart(2, "0")}/{issued.exp_year}</strong></span></div></div><div className="flex flex-wrap gap-3 p-4"><button type="button" onClick={() => void copyCredentials(issued)} className="bank-primary">Kartendaten kopieren</button><button type="button" onClick={() => setIssued(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Ausblenden</button></div></Card>}
+		{issued && <Card className="overflow-hidden border-emerald-200"><div className="bg-gradient-to-br from-[#003b70] to-[#0874b9] p-6 text-white"><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Nur 60 Sekunden sichtbar</p><h2 className="mt-1 text-xl font-extrabold">Ihre virtuelle Karte</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">Kartennummer und CVC werden verschlüsselt bei der Bank gespeichert und nach 60 Sekunden aus dieser Ansicht entfernt.</p><p className="mt-6 font-mono text-xl font-bold tracking-[.12em] sm:text-2xl">{formatCardNumber(issued.card_number)}</p><div className="mt-5 flex flex-wrap gap-5 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{issued.cvc}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(issued.exp_month).padStart(2, "0")}/{issued.exp_year}</strong></span></div></div><div className="flex flex-wrap gap-3 p-4"><button type="button" onClick={() => void copyCredentials(issued)} className="bank-primary">Kartendaten kopieren</button><button type="button" onClick={() => setIssued(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Ausblenden</button></div></Card>}
 		<Card className="p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Virtuelle Karten</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Meine Karten</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Jede Karte ist mit einem EUR-Konto verbunden. Beim Bezahlen wird die Karte als Händler-Token genutzt; die CVC wird bei jeder Zahlung erneut geprüft.</p></div></div>{cards.length ? <div className="mt-6 grid gap-4 md:grid-cols-2">{cards.map((card) => { const visible = revealed?.id === card.id; const loading = revealingCardID === card.id; return <div key={card.id} className="rounded-2xl bg-gradient-to-br from-[#003b70] to-[#0874b9] p-5 text-white shadow-[0_12px_30px_rgba(0,59,112,.18)]"><div className="flex items-start justify-between"><span className="text-sm font-extrabold uppercase tracking-[.15em]">{card.brand}</span><span className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold">{card.status}</span></div><p className="mt-8 text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Kartennummer</p><p className="mt-1 font-mono text-xl tracking-[.12em]">{visible ? formatCardNumber(revealed.card_number) : `•••• •••• •••• ${card.last4}`}</p><div className="mt-4 flex gap-6 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{visible ? revealed.cvc : "•••"}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(card.exp_month).padStart(2, "0")}/{card.exp_year}</strong></span></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" aria-pressed={visible} disabled={loading} onClick={() => void revealCredentials(card)} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-[#003b70] disabled:cursor-wait disabled:opacity-60">{loading ? "Wird geladen…" : visible ? "Kartendaten verbergen" : "Kartendaten anzeigen"}</button><button type="button" disabled={!visible} onClick={() => { if (revealed) void copyCredentials(revealed); }} className="rounded-lg border border-white/40 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">Kopieren</button></div></div>; })}</div> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Noch keine virtuelle Karte erstellt.</p>}</Card>
 		<Card className="p-5 sm:p-6"><h2 className="text-lg font-extrabold text-slate-900">Neue virtuelle Karte</h2><p className="mt-2 text-sm text-slate-500">Für ein aktives EUR-Konto können mehrere virtuelle Karten erstellt werden.</p>{availableAccounts.length ? <div className="mt-5 flex flex-col gap-3 sm:flex-row"><select aria-label="Konto für die virtuelle Karte" value={accountID} onChange={(event) => setAccountID(event.target.value)} className="bank-input flex-1">{availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.masked_iban}</option>)}</select><button type="button" onClick={() => void create()} disabled={busy || !accountID} className="bank-primary disabled:cursor-wait disabled:opacity-50">{busy ? "Wird erstellt…" : "Karte erstellen"}</button></div> : <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Sie benötigen ein aktives EUR-Konto, um eine Karte zu erstellen.</p>}</Card>
+		{cards.length > 0 && <Card className="p-5 sm:p-6"><h2 className="text-lg font-extrabold text-slate-900">Karten verwalten</h2><div className="mt-4 divide-y divide-slate-100">{cards.map((card) => <div key={card.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-bold text-slate-800">{card.brand.toUpperCase()} •••• {card.last4}</p><p className="text-xs text-slate-500">Status: {card.status}</p></div>{card.status === "CANCELLED" ? <button type="button" disabled={lifecycleCardID === card.id} onClick={() => void deleteStoredCard(card)} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">Karte löschen</button> : <button type="button" disabled={lifecycleCardID === card.id} onClick={() => void cancelStoredCard(card)} className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-bold text-amber-800 disabled:opacity-50">Karte kündigen</button>}</div>)}</div></Card>}
 		{feedback && <p role="status" className="text-sm text-slate-600">{feedback}</p>}
 	</div>;
 }

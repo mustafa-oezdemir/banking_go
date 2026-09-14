@@ -1,6 +1,7 @@
 package card
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,6 +14,25 @@ func TestGeneratePANCreatesValidVisaNumber(t *testing.T) {
 	}
 	if len(pan) != 16 || pan[0] != '4' || !validPAN(pan) {
 		t.Fatalf("generatePAN() = %q, want a valid 16-digit Visa PAN", pan)
+	}
+}
+
+func TestStoredCredentialsUseAuthenticatedEncryption(t *testing.T) {
+	service := NewService(nil, "test-card-data-key-with-at-least-32-bytes")
+	encrypted, err := service.encrypt("4242424242424242")
+	if err != nil {
+		t.Fatalf("encrypt() error = %v", err)
+	}
+	if bytes.Contains(encrypted, []byte("4242424242424242")) {
+		t.Fatal("ciphertext contains plaintext PAN")
+	}
+	plainText, err := service.decrypt(encrypted)
+	if err != nil || plainText != "4242424242424242" {
+		t.Fatalf("decrypt() = %q, %v", plainText, err)
+	}
+	encrypted[len(encrypted)-1] ^= 1
+	if _, err = service.decrypt(encrypted); err == nil {
+		t.Fatal("tampered ciphertext was accepted")
 	}
 }
 
