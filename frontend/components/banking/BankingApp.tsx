@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import {
 	cancelPayment,
+	createAccount,
 	deleteStandingOrder,
 	getAccountTransactions,
 	getAccount,
@@ -16,6 +17,7 @@ import {
 	getSession,
 	getProfile,
 	issueCard,
+	getCardCredentials,
 	getAdminOverview,
 	updateAdminUserRole,
 	updateAdminAccountStatus,
@@ -26,7 +28,7 @@ import {
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { normalizePlainText, plainTextError } from "@/lib/inputValidation";
-import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, IssuedPaymentCard, Payment, PaymentCard, StandingOrder } from "@/lib/types";
+import type { Account, AdminOverview, Beneficiary, CustomerProfile, CustomerProfileUpdate, Entry, IssuedPaymentCard, Payment, PaymentCard, PaymentCardCredentials, StandingOrder } from "@/lib/types";
 import { TransferWizard } from "./TransferWizard";
 
 type View = "overview" | "accounts" | "cards" | "transactions" | "transfer" | "scheduled" | "standing" | "beneficiaries" | "profile" | "admin";
@@ -238,7 +240,7 @@ export function BankingApp() {
 					{loading ? <Loading /> : (
 						<>
 							{view === "overview" && <Overview accounts={storedAccounts} entries={entries} payments={payments} total={totalBalance} available={availableBalance} income={income} expenses={expenses} pending={pending.length} onNavigate={setView} />}
-							{view === "accounts" && <Accounts accounts={storedAccounts} />}
+							{view === "accounts" && <Accounts accounts={storedAccounts} onCreated={loadAll} />}
 							{view === "cards" && <Cards accounts={storedAccounts} cards={cards} onCardsChange={setCards} />}
 							{view === "transactions" && <Transactions entries={entries} />}
 							{view === "transfer" && <TransferWizard accounts={storedAccounts} onComplete={loadAll} />}
@@ -301,16 +303,59 @@ function AccountTile({ account }: { account: Account }) {
 	return <div className="group rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg"><div className="flex justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#0066a1]"><NavigationGlyph name="wallet" /></span><div className="min-w-0"><p className="truncate font-bold text-slate-800">{account.name}</p><p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">{account.masked_iban}</p></div></div><span className="h-fit rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700">Aktiv</span></div><p className="mt-5 text-2xl font-extrabold tabular-nums tracking-tight text-slate-900">{formatCurrency(account.balance)}</p><p className="mt-1 text-xs font-medium text-slate-400">Verfügbar <span className="text-slate-600">{formatCurrency(account.available_balance)}</span></p></div>;
 }
 
-function Accounts({ accounts }: { accounts: Account[] }) {
-	return <div className="grid gap-5 lg:grid-cols-2">{accounts.map((account) => <AccountDetailsCard key={account.id} account={account} />)}</div>;
+function Accounts({ accounts, onCreated }: { accounts: Account[]; onCreated: () => Promise<void> }) {
+	const [name, setName] = useState("");
+	const [accountType, setAccountType] = useState<"GIROKONTO" | "SPARKONTO">("SPARKONTO");
+	const [busy, setBusy] = useState(false);
+	const [feedback, setFeedback] = useState("");
+
+	const create = async (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		const validationError = plainTextError(name, "Kontoname", { required: true, min: 2, max: 100 });
+		if (validationError) {
+			setFeedback(validationError);
+			return;
+		}
+		setBusy(true);
+		setFeedback("");
+		try {
+			const result = await createAccount(normalizePlainText(name), accountType);
+			if (!result.response.ok) throw new Error("Das Konto konnte nicht eröffnet werden.");
+			setName("");
+			setFeedback(`${accountType === "SPARKONTO" ? "Sparkonto" : "Girokonto"} wurde erfolgreich eröffnet.`);
+			await onCreated();
+		} catch (createError) {
+			setFeedback(createError instanceof Error ? createError.message : "Das Konto konnte nicht eröffnet werden.");
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return <div className="space-y-6">
+		<Card className="p-5 sm:p-6">
+			<div className="grid gap-5 lg:grid-cols-[1fr_1.15fr] lg:items-end">
+				<div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Eigenes Konto</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Neues Konto eröffnen</h2><p className="mt-2 text-sm leading-6 text-slate-500">Eröffnen Sie selbst ein Sparkonto oder Girokonto in EUR. Sie erhalten automatisch eine eigene Demo-IBAN.</p></div>
+				<form onSubmit={(event) => void create(event)} className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+					<label className="sr-only" htmlFor="new-account-name">Kontoname</label><input id="new-account-name" value={name} onChange={(event) => setName(event.target.value)} disabled={busy} required minLength={2} maxLength={100} placeholder="z. B. Urlaubssparen" className="bank-input" />
+					<label className="sr-only" htmlFor="new-account-type">Kontotyp</label><select id="new-account-type" value={accountType} onChange={(event) => setAccountType(event.target.value as "GIROKONTO" | "SPARKONTO")} disabled={busy} className="bank-input"><option value="SPARKONTO">Sparkonto</option><option value="GIROKONTO">Girokonto</option></select>
+					<button type="submit" disabled={busy} className="bank-primary whitespace-nowrap disabled:cursor-wait disabled:opacity-50">{busy ? "Wird eröffnet…" : "Konto eröffnen"}</button>
+				</form>
+			</div>
+			{feedback && <p role="status" className="mt-4 text-sm text-slate-600">{feedback}</p>}
+		</Card>
+		<div className="grid gap-5 lg:grid-cols-2">{accounts.map((account) => <AccountDetailsCard key={account.id} account={account} />)}</div>
+	</div>;
 }
 
 function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards: PaymentCard[]; onCardsChange: (cards: PaymentCard[]) => void }) {
-	const availableAccounts = accounts.filter((account) => account.status === "ACTIVE" && account.currency === "EUR" && !cards.some((card) => card.account_id === account.id && card.status === "ACTIVE"));
+	const availableAccounts = accounts.filter((account) => account.status === "ACTIVE" && account.currency === "EUR");
 	const [accountID, setAccountID] = useState("");
 	const [issued, setIssued] = useState<IssuedPaymentCard | null>(null);
+	const [revealed, setRevealed] = useState<PaymentCardCredentials | null>(null);
+	const [revealingCardID, setRevealingCardID] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [feedback, setFeedback] = useState("");
+	const revealRequest = useRef<AbortController | null>(null);
 
 	useEffect(() => {
 		if (!availableAccounts.length) return;
@@ -319,9 +364,25 @@ function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards:
 
 	useEffect(() => {
 		if (!issued) return;
-		const timeout = window.setTimeout(() => setIssued(null), 5 * 60 * 1000);
+		const timeout = window.setTimeout(() => setIssued(null), 60 * 1000);
 		return () => window.clearTimeout(timeout);
 	}, [issued]);
+
+	useEffect(() => {
+		if (!revealed) return;
+		const timeout = window.setTimeout(() => {
+			setRevealed(null);
+			setFeedback("Kartendaten wurden nach 60 Sekunden automatisch verborgen.");
+		}, 60 * 1000);
+		return () => window.clearTimeout(timeout);
+	}, [revealed]);
+
+	useEffect(() => () => {
+		revealRequest.current?.abort();
+		revealRequest.current = null;
+		setIssued(null);
+		setRevealed(null);
+	}, []);
 
 	const create = async () => {
 		if (!accountID) return;
@@ -339,20 +400,54 @@ function Cards({ accounts, cards, onCardsChange }: { accounts: Account[]; cards:
 		}
 	};
 
-	const copyCredentials = async () => {
-		if (!issued) return;
+	const copyCredentials = async (credentials: IssuedPaymentCard | PaymentCardCredentials) => {
 		try {
-			await navigator.clipboard.writeText(`${formatCardNumber(issued.card_number)}\nCVC: ${issued.cvc}\nGültig bis: ${String(issued.exp_month).padStart(2, "0")}/${issued.exp_year}`);
+			await navigator.clipboard.writeText(`${formatCardNumber(credentials.card_number)}\nCVC: ${credentials.cvc}\nGültig bis: ${String(credentials.exp_month).padStart(2, "0")}/${credentials.exp_year}`);
 			setFeedback("Kartendaten wurden in die Zwischenablage kopiert.");
 		} catch {
 			setFeedback("Kartendaten konnten nicht kopiert werden.");
 		}
 	};
 
+	const revealCredentials = async (card: PaymentCard) => {
+		if (revealed?.id === card.id) {
+			setRevealed(null);
+			setFeedback("Kartendaten wurden verborgen.");
+			return;
+		}
+		revealRequest.current?.abort();
+		const controller = new AbortController();
+		revealRequest.current = controller;
+		setRevealed(null);
+		setRevealingCardID(card.id);
+		setFeedback("");
+		try {
+			const result = await getCardCredentials(card.id, controller.signal);
+			if (controller.signal.aborted) return;
+			if (!result.response.ok) {
+				throw new Error(result.response.status === 404 ? "Kartendaten für diese bestehende Demo-Karte sind nicht mehr verfügbar." : "Kartendaten konnten nicht geladen werden.");
+			}
+			if (result.data.id !== card.id || result.data.account_id !== card.account_id) {
+				throw new Error("Kartendaten konnten nicht geladen werden.");
+			}
+			setRevealed(result.data);
+			setFeedback("Kartendaten werden angezeigt und nach 60 Sekunden automatisch verborgen.");
+		} catch (revealError) {
+			if (controller.signal.aborted) return;
+			const isUnavailable = revealError instanceof Error && revealError.message === "Kartendaten für diese bestehende Demo-Karte sind nicht mehr verfügbar.";
+			setFeedback(isUnavailable ? revealError.message : "Kartendaten konnten nicht geladen werden. Bitte versuchen Sie es erneut.");
+		} finally {
+			if (revealRequest.current === controller) {
+				revealRequest.current = null;
+				setRevealingCardID("");
+			}
+		}
+	};
+
 	return <div className="space-y-6">
-		{issued && <Card className="overflow-hidden border-emerald-200"><div className="bg-gradient-to-br from-[#003b70] to-[#0874b9] p-6 text-white"><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Nur jetzt sichtbar</p><h2 className="mt-1 text-xl font-extrabold">Ihre virtuelle Karte</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">Notieren Sie die Daten jetzt. Kartennummer und CVC werden nicht gespeichert und nach fünf Minuten aus dieser Ansicht entfernt.</p><p className="mt-6 font-mono text-xl font-bold tracking-[.12em] sm:text-2xl">{formatCardNumber(issued.card_number)}</p><div className="mt-5 flex flex-wrap gap-5 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{issued.cvc}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(issued.exp_month).padStart(2, "0")}/{issued.exp_year}</strong></span></div></div><div className="flex flex-wrap gap-3 p-4"><button type="button" onClick={() => void copyCredentials()} className="bank-primary">Kartendaten kopieren</button><button type="button" onClick={() => setIssued(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Ausblenden</button></div></Card>}
-		<Card className="p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Virtuelle Karten</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Meine Karten</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Jede Karte ist mit einem EUR-Konto verbunden. Beim Bezahlen wird die Karte als Händler-Token genutzt; die CVC wird bei jeder Zahlung erneut geprüft.</p></div></div>{cards.length ? <div className="mt-6 grid gap-4 md:grid-cols-2">{cards.map((card) => <div key={card.id} className="rounded-2xl bg-gradient-to-br from-[#003b70] to-[#0874b9] p-5 text-white shadow-[0_12px_30px_rgba(0,59,112,.18)]"><div className="flex items-start justify-between"><span className="text-sm font-extrabold uppercase tracking-[.15em]">{card.brand}</span><span className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold">{card.status}</span></div><p className="mt-8 font-mono text-xl tracking-[.12em]">•••• •••• •••• {card.last4}</p><p className="mt-4 text-sm text-blue-100">Gültig bis {String(card.exp_month).padStart(2, "0")}/{card.exp_year}</p></div>)}</div> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Noch keine virtuelle Karte erstellt.</p>}</Card>
-		<Card className="p-5 sm:p-6"><h2 className="text-lg font-extrabold text-slate-900">Neue virtuelle Karte</h2><p className="mt-2 text-sm text-slate-500">Pro aktivem Konto kann eine Karte erstellt werden.</p>{availableAccounts.length ? <div className="mt-5 flex flex-col gap-3 sm:flex-row"><select aria-label="Konto für die virtuelle Karte" value={accountID} onChange={(event) => setAccountID(event.target.value)} className="bank-input flex-1">{availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.masked_iban}</option>)}</select><button type="button" onClick={() => void create()} disabled={busy || !accountID} className="bank-primary disabled:cursor-wait disabled:opacity-50">{busy ? "Wird erstellt…" : "Karte erstellen"}</button></div> : <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Sie benötigen ein weiteres aktives EUR-Konto, um eine zusätzliche Karte zu erstellen.</p>}</Card>
+		{issued && <Card className="overflow-hidden border-emerald-200"><div className="bg-gradient-to-br from-[#003b70] to-[#0874b9] p-6 text-white"><p className="text-xs font-bold uppercase tracking-[.16em] text-blue-100">Nur 60 Sekunden sichtbar</p><h2 className="mt-1 text-xl font-extrabold">Ihre virtuelle Karte</h2><p className="mt-2 max-w-2xl text-sm text-blue-100">Kartennummer und CVC werden nicht gespeichert und nach 60 Sekunden aus dieser Ansicht entfernt.</p><p className="mt-6 font-mono text-xl font-bold tracking-[.12em] sm:text-2xl">{formatCardNumber(issued.card_number)}</p><div className="mt-5 flex flex-wrap gap-5 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{issued.cvc}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(issued.exp_month).padStart(2, "0")}/{issued.exp_year}</strong></span></div></div><div className="flex flex-wrap gap-3 p-4"><button type="button" onClick={() => void copyCredentials(issued)} className="bank-primary">Kartendaten kopieren</button><button type="button" onClick={() => setIssued(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50">Ausblenden</button></div></Card>}
+		<Card className="p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[#0874b9]">Virtuelle Karten</p><h2 className="mt-1 text-xl font-extrabold text-slate-900">Meine Karten</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Jede Karte ist mit einem EUR-Konto verbunden. Beim Bezahlen wird die Karte als Händler-Token genutzt; die CVC wird bei jeder Zahlung erneut geprüft.</p></div></div>{cards.length ? <div className="mt-6 grid gap-4 md:grid-cols-2">{cards.map((card) => { const visible = revealed?.id === card.id; const loading = revealingCardID === card.id; return <div key={card.id} className="rounded-2xl bg-gradient-to-br from-[#003b70] to-[#0874b9] p-5 text-white shadow-[0_12px_30px_rgba(0,59,112,.18)]"><div className="flex items-start justify-between"><span className="text-sm font-extrabold uppercase tracking-[.15em]">{card.brand}</span><span className="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold">{card.status}</span></div><p className="mt-8 text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Kartennummer</p><p className="mt-1 font-mono text-xl tracking-[.12em]">{visible ? formatCardNumber(revealed.card_number) : `•••• •••• •••• ${card.last4}`}</p><div className="mt-4 flex gap-6 text-sm"><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">CVC</span><strong className="font-mono text-lg">{visible ? revealed.cvc : "•••"}</strong></span><span><span className="block text-[10px] font-bold uppercase tracking-[.14em] text-blue-100">Gültig bis</span><strong>{String(card.exp_month).padStart(2, "0")}/{card.exp_year}</strong></span></div><div className="mt-5 flex flex-wrap gap-2"><button type="button" aria-pressed={visible} disabled={loading} onClick={() => void revealCredentials(card)} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-[#003b70] disabled:cursor-wait disabled:opacity-60">{loading ? "Wird geladen…" : visible ? "Kartendaten verbergen" : "Kartendaten anzeigen"}</button><button type="button" disabled={!visible} onClick={() => { if (revealed) void copyCredentials(revealed); }} className="rounded-lg border border-white/40 px-3 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">Kopieren</button></div></div>; })}</div> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Noch keine virtuelle Karte erstellt.</p>}</Card>
+		<Card className="p-5 sm:p-6"><h2 className="text-lg font-extrabold text-slate-900">Neue virtuelle Karte</h2><p className="mt-2 text-sm text-slate-500">Für ein aktives EUR-Konto können mehrere virtuelle Karten erstellt werden.</p>{availableAccounts.length ? <div className="mt-5 flex flex-col gap-3 sm:flex-row"><select aria-label="Konto für die virtuelle Karte" value={accountID} onChange={(event) => setAccountID(event.target.value)} className="bank-input flex-1">{availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.masked_iban}</option>)}</select><button type="button" onClick={() => void create()} disabled={busy || !accountID} className="bank-primary disabled:cursor-wait disabled:opacity-50">{busy ? "Wird erstellt…" : "Karte erstellen"}</button></div> : <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-800">Sie benötigen ein aktives EUR-Konto, um eine Karte zu erstellen.</p>}</Card>
 		{feedback && <p role="status" className="text-sm text-slate-600">{feedback}</p>}
 	</div>;
 }

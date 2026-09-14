@@ -185,12 +185,23 @@ func TestAccountCRUDAndOwnership(t *testing.T) {
 		ownerToken,
 		http.MethodPost,
 		"/accounts",
-		map[string]string{"name": "  Main Account  "},
+		map[string]string{"name": "  My Savings  ", "account_type": "SPARKONTO"},
 	)
 	require.Equal(t, http.StatusCreated, createResponse.Code)
 	var account AccountResponse
 	require.NoError(t, json.NewDecoder(createResponse.Body).Decode(&account))
-	assert.Equal(t, "Main Account", account.Name)
+	assert.Equal(t, "My Savings", account.Name)
+	assert.Equal(t, "SPARKONTO", account.AccountType)
+
+	settlementResponse := performJSONRequest(
+		t,
+		router,
+		ownerToken,
+		http.MethodPost,
+		"/accounts",
+		map[string]string{"name": "Forbidden Settlement", "account_type": "SETTLEMENT"},
+	)
+	require.Equal(t, http.StatusBadRequest, settlementResponse.Code)
 
 	accountPath := "/accounts/" + account.ID
 	readResponse := performJSONRequest(t, router, ownerToken, http.MethodGet, accountPath, nil)

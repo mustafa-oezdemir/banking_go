@@ -20,6 +20,8 @@ type Merchant struct {
 	BeneficiaryAccountID uuid.UUID
 	BeneficiaryIBAN      string
 	ReturnURL            string
+	WebhookURL           string
+	WebhookSecret        string
 	Active               bool
 }
 
@@ -35,6 +37,8 @@ type MerchantPaymentIntent struct {
 	Status            string
 	PaymentOrderID    uuid.NullUUID
 	ReturnURL         string
+	WebhookURL        string
+	WebhookSecret     string
 	ExpiresAt         time.Time
 	CreatedAt         time.Time
 }
@@ -43,13 +47,13 @@ type MerchantPaymentIntent struct {
 func (store *Store) GetMerchant(ctx context.Context, merchantID string) (Merchant, error) {
 	var merchant Merchant
 	err := store.db.QueryRowContext(ctx, `
-		SELECT m.id, m.name, m.beneficiary_account_id, a.iban, m.return_url, m.active
+		SELECT m.id, m.name, m.beneficiary_account_id, a.iban, m.return_url, COALESCE(m.webhook_url, ''), COALESCE(m.webhook_secret, ''), m.active
 		FROM merchants m
 		JOIN accounts a ON a.id = m.beneficiary_account_id
 		WHERE m.id = $1
 	`, merchantID).Scan(
 		&merchant.ID, &merchant.Name, &merchant.BeneficiaryAccountID, &merchant.BeneficiaryIBAN,
-		&merchant.ReturnURL, &merchant.Active,
+		&merchant.ReturnURL, &merchant.WebhookURL, &merchant.WebhookSecret, &merchant.Active,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Merchant{}, ErrMerchantNotFound
@@ -73,7 +77,7 @@ func (store *Store) CreateMerchantPaymentIntent(
 	if err != nil {
 		return MerchantPaymentIntent{}, err
 	}
-	intent.MerchantName, intent.BeneficiaryIBAN, intent.ReturnURL = merchant.Name, merchant.BeneficiaryIBAN, merchant.ReturnURL
+	intent.MerchantName, intent.BeneficiaryIBAN, intent.ReturnURL, intent.WebhookURL, intent.WebhookSecret = merchant.Name, merchant.BeneficiaryIBAN, merchant.ReturnURL, merchant.WebhookURL, merchant.WebhookSecret
 	return intent, nil
 }
 
@@ -82,7 +86,7 @@ func (store *Store) GetMerchantPaymentIntent(ctx context.Context, intentID uuid.
 	var intent MerchantPaymentIntent
 	err := store.db.QueryRowContext(ctx, `
 		SELECT i.id, i.merchant_id, m.name, a.iban, i.merchant_reference, i.amount, i.currency,
-		       i.status, i.payment_order_id, m.return_url, i.expires_at, i.created_at
+		       i.status, i.payment_order_id, m.return_url, COALESCE(m.webhook_url, ''), COALESCE(m.webhook_secret, ''), i.expires_at, i.created_at
 		FROM merchant_payment_intents i
 		JOIN merchants m ON m.id = i.merchant_id
 		JOIN accounts a ON a.id = m.beneficiary_account_id
@@ -90,7 +94,7 @@ func (store *Store) GetMerchantPaymentIntent(ctx context.Context, intentID uuid.
 	`, intentID).Scan(
 		&intent.ID, &intent.MerchantID, &intent.MerchantName, &intent.BeneficiaryIBAN,
 		&intent.MerchantReference, &intent.Amount, &intent.Currency, &intent.Status,
-		&intent.PaymentOrderID, &intent.ReturnURL, &intent.ExpiresAt, &intent.CreatedAt,
+		&intent.PaymentOrderID, &intent.ReturnURL, &intent.WebhookURL, &intent.WebhookSecret, &intent.ExpiresAt, &intent.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MerchantPaymentIntent{}, ErrMerchantNotFound
@@ -103,7 +107,7 @@ func (store *Store) GetMerchantPaymentIntentByMerchantReference(ctx context.Cont
 	var intent MerchantPaymentIntent
 	err := store.db.QueryRowContext(ctx, `
 		SELECT i.id, i.merchant_id, m.name, a.iban, i.merchant_reference, i.amount, i.currency,
-		       i.status, i.payment_order_id, m.return_url, i.expires_at, i.created_at
+		       i.status, i.payment_order_id, m.return_url, COALESCE(m.webhook_url, ''), COALESCE(m.webhook_secret, ''), i.expires_at, i.created_at
 		FROM merchant_payment_intents i
 		JOIN merchants m ON m.id = i.merchant_id
 		JOIN accounts a ON a.id = m.beneficiary_account_id
@@ -111,12 +115,30 @@ func (store *Store) GetMerchantPaymentIntentByMerchantReference(ctx context.Cont
 	`, merchantID, reference).Scan(
 		&intent.ID, &intent.MerchantID, &intent.MerchantName, &intent.BeneficiaryIBAN,
 		&intent.MerchantReference, &intent.Amount, &intent.Currency, &intent.Status,
-		&intent.PaymentOrderID, &intent.ReturnURL, &intent.ExpiresAt, &intent.CreatedAt,
+		&intent.PaymentOrderID, &intent.ReturnURL, &intent.WebhookURL, &intent.WebhookSecret, &intent.ExpiresAt, &intent.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MerchantPaymentIntent{}, ErrMerchantNotFound
 	}
 	return intent, err
+}
+
+// ConfigureMerchantWebhook updates the local merchant callback configuration at boot.
+func (store *Store) ConfigureMerchantWebhook(ctx context.Context, merchantID, webhookURL, webhookSecret string) error {
+	result, err := store.db.ExecContext(ctx, `
+		UPDATE merchants SET webhook_url = $2, webhook_secret = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $1
+	`, merchantID, webhookURL, webhookSecret)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return ErrMerchantNotFound
+	}
+	return nil
 }
 
 // LinkMerchantIntentPayment binds an intent to the single payment order created from it.

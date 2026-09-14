@@ -67,6 +67,28 @@ func (h *Handler) ListCards(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+// GetCardCredentials reveals a versioned demo card only to its authenticated owner.
+func (h *Handler) GetCardCredentials(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	ownerID, err := authenticatedUserID(r)
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	cardID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusNotFound, "card credentials are unavailable")
+		return
+	}
+	revealed, err := h.cards.Reveal(r.Context(), ownerID, cardID)
+	if err != nil {
+		respondCardError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, revealed)
+}
+
 func (h *Handler) TokenizeMerchantCard(w http.ResponseWriter, r *http.Request) {
 	if !validMerchantAPIToken(r) {
 		respondError(w, http.StatusUnauthorized, "unauthorized")
@@ -135,6 +157,8 @@ func respondCardError(w http.ResponseWriter, err error) {
 		respondError(w, http.StatusUnauthorized, "invalid card credentials")
 	case errors.Is(err, card.ErrCardUnavailable):
 		respondError(w, http.StatusConflict, "card is unavailable")
+	case errors.Is(err, card.ErrCardCredentialsUnavailable):
+		respondError(w, http.StatusNotFound, "card credentials are unavailable")
 	default:
 		respondError(w, http.StatusInternalServerError, "card operation failed")
 	}

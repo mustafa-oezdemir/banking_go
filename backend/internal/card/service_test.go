@@ -1,6 +1,10 @@
 package card
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
 
 func TestGeneratePANCreatesValidVisaNumber(t *testing.T) {
 	pan, err := generatePAN()
@@ -35,5 +39,21 @@ func TestValidPAN(t *testing.T) {
 func TestNormalizePAN(t *testing.T) {
 	if got := normalizePAN(" 4242-4242 4242-4242 "); got != "4242424242424242" {
 		t.Fatalf("normalizePAN() = %q", got)
+	}
+}
+
+func TestDerivedCredentialsAreDeterministicAndValid(t *testing.T) {
+	service := NewService(nil, "0123456789abcdef0123456789abcdef")
+	cardID := uuid.MustParse("c0a80101-0000-4000-8000-000000000001")
+	pan, cvc := service.deriveCredentials(cardID)
+	secondPAN, secondCVC := service.deriveCredentials(cardID)
+	if pan != secondPAN || cvc != secondCVC {
+		t.Fatal("derived credentials must be deterministic")
+	}
+	if !validPAN(pan) {
+		t.Fatalf("derived PAN %q is not Luhn-valid", pan)
+	}
+	if !validCVC(cvc) {
+		t.Fatalf("derived CVC %q is not a 3-digit value", cvc)
 	}
 }

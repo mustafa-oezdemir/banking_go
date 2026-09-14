@@ -41,6 +41,17 @@ func validateAccountName(rawName string) (string, error) {
 	return account.ValidateName(rawName)
 }
 
+func validateCustomerAccountType(rawType string) (string, error) {
+	switch accountType := strings.ToUpper(strings.TrimSpace(rawType)); accountType {
+	case "", "GIROKONTO":
+		return "GIROKONTO", nil
+	case "SPARKONTO":
+		return "SPARKONTO", nil
+	default:
+		return "", errors.New("account_type must be GIROKONTO or SPARKONTO")
+	}
+}
+
 func authenticatedUserID(r *http.Request) (uuid.UUID, error) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
@@ -92,6 +103,11 @@ func (h *Handler) SetNotificationSender(sender notification.Sender) {
 	}
 }
 
+// SetMerchantCompletionNotifier wires the Banking payment boundary to an external merchant callback transport.
+func (h *Handler) SetMerchantCompletionNotifier(notifier merchant.CompletionNotifier) {
+	h.merchants.SetCompletionNotifier(notifier)
+}
+
 func (h *Handler) notifyActivity(ctx context.Context, activity notification.Activity) {
 	if err := h.notifier.NotifyActivity(ctx, activity); err != nil {
 		log.Warn().Err(err).Str("kind", activity.Kind).Msg("Post-commit notification failed")
@@ -120,11 +136,11 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 
 // CreateAccount godoc
 // @Summary      Create a new account
-// @Description  Creates a new user-owned account with name and currency
+// @Description  Creates a new user-owned Girokonto or Sparkonto in EUR
 // @Tags         accounts
 // @Accept       json
 // @Produce      json
-// @Param        body    body      object{name=string}  true  "Account details"
+// @Param        body    body      object{name=string,account_type=string}  true  "Account details"
 // @Success      201     {object}  AccountResponse
 // @Failure      400     {object}  ErrorResponse
 // @Failure      401     {object}  ErrorResponse
@@ -154,13 +170,19 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: Decode request payload.
 	var input struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		AccountType string `json:"account_type"`
 	}
 	if decodeErr := decodeStrictJSON(r, &input); decodeErr != nil {
 		respondError(w, http.StatusBadRequest, "invalid input")
 		return
 	}
 	name, validationErr := validateAccountName(input.Name)
+	if validationErr != nil {
+		respondError(w, http.StatusBadRequest, validationErr.Error())
+		return
+	}
+	accountType, validationErr := validateCustomerAccountType(input.AccountType)
 	if validationErr != nil {
 		respondError(w, http.StatusBadRequest, validationErr.Error())
 		return
@@ -177,7 +199,7 @@ func (h *Handler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		acc, err = h.store.CreateAccount(r.Context(), sqlc.CreateAccountParams{
 			OwnerID: uuid.NullUUID{UUID: userID, Valid: true}, Name: name,
 			Currency: "EUR", IsSystem: false, Iban: iban,
-			AccountType: "GIROKONTO", Status: "ACTIVE",
+			AccountType: accountType, Status: "ACTIVE",
 		})
 		if err == nil {
 			break

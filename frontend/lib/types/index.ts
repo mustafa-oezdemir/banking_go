@@ -92,6 +92,18 @@ export interface IssuedPaymentCard extends PaymentCard {
 	cvc: string;
 }
 
+/** Sensitive values returned only after an explicit, owner-authorized reveal. */
+export interface PaymentCardCredentials {
+	id: string;
+	account_id: string;
+	card_number: string;
+	cvc: string;
+	brand: string;
+	last4: string;
+	exp_month: number;
+	exp_year: number;
+}
+
 export interface Entry {
   id: string;
   account_id: string;

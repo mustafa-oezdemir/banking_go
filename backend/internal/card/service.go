@@ -20,11 +20,25 @@ import (
 )
 
 var (
-	ErrInvalidCard     = errors.New("invalid card credentials")
-	ErrCardUnavailable = errors.New("card is unavailable")
+	ErrInvalidCard                = errors.New("invalid card credentials")
+	ErrCardUnavailable            = errors.New("card is unavailable")
+	ErrCardCredentialsUnavailable = errors.New("card credentials are unavailable")
 )
 
 type IssuedCard struct {
+	ID         uuid.UUID `json:"id"`
+	AccountID  uuid.UUID `json:"account_id"`
+	CardNumber string    `json:"card_number"`
+	CVC        string    `json:"cvc"`
+	Brand      string    `json:"brand"`
+	Last4      string    `json:"last4"`
+	ExpMonth   int       `json:"exp_month"`
+	ExpYear    int       `json:"exp_year"`
+	Status     string    `json:"status"`
+}
+
+// RevealedCard is returned only to the authenticated owner on explicit request.
+type RevealedCard struct {
 	ID         uuid.UUID `json:"id"`
 	AccountID  uuid.UUID `json:"account_id"`
 	CardNumber string    `json:"card_number"`
@@ -70,38 +84,41 @@ func (service *Service) Issue(ctx context.Context, ownerID, accountID uuid.UUID)
 	if err != nil || !sepa.CustomerCanOperate(ownerID, account.OwnerID.UUID, account.OwnerID.Valid, account.IsSystem) || account.Status != "ACTIVE" || account.Currency != "EUR" {
 		return IssuedCard{}, ErrCardUnavailable
 	}
-	// A single active virtual card per account keeps card lifecycle predictable.
-	// Credentials are deliberately only shown at the moment of issuance.
-	existing, err := service.store.ListPaymentCardsByOwner(ctx, ownerID)
-	if err != nil {
-		return IssuedCard{}, err
-	}
-	for _, item := range existing {
-		if item.AccountID == accountID && item.Status == "ACTIVE" {
-			return IssuedCard{}, ErrCardUnavailable
-		}
-	}
-	pan, err := generatePAN()
-	if err != nil {
-		return IssuedCard{}, err
-	}
-	cvc, err := randomDigits(3)
-	if err != nil {
-		return IssuedCard{}, err
-	}
+	// Multiple virtual cards may be attached to the same active EUR account.
+	// Each card gets independent credentials and a separate merchant token.
+	cardID := uuid.New()
+	pan, cvc := service.deriveCredentials(cardID)
 	hash, err := bcrypt.GenerateFromPassword([]byte(cvc), bcrypt.DefaultCost)
 	if err != nil {
 		return IssuedCard{}, err
 	}
 	expires := service.now().UTC().AddDate(3, 0, 0)
 	card, err := service.store.CreatePaymentCard(ctx, db.PaymentCard{
+		ID:      cardID,
 		OwnerID: ownerID, AccountID: accountID, PANFingerprint: service.fingerprint("pan:" + pan), LastFour: pan[len(pan)-4:], Brand: "visa",
-		ExpMonth: int(expires.Month()), ExpYear: expires.Year(), CVCHash: string(hash), Status: "ACTIVE",
+		ExpMonth: int(expires.Month()), ExpYear: expires.Year(), CVCHash: string(hash), CredentialVersion: 1, Status: "ACTIVE",
 	})
 	if err != nil {
 		return IssuedCard{}, err
 	}
-	return IssuedCard{ID: card.ID, AccountID: accountID, CardNumber: pan, CVC: cvc, Brand: card.Brand, Last4: card.LastFour, ExpMonth: card.ExpMonth, ExpYear: card.ExpYear}, nil
+	return IssuedCard{ID: card.ID, AccountID: accountID, CardNumber: pan, CVC: cvc, Brand: card.Brand, Last4: card.LastFour, ExpMonth: card.ExpMonth, ExpYear: card.ExpYear, Status: "ACTIVE"}, nil
+}
+
+// Reveal derives credentials only for cards created under the versioned scheme.
+// Neither raw PAN nor CVC is persisted.
+func (service *Service) Reveal(ctx context.Context, ownerID, cardID uuid.UUID) (RevealedCard, error) {
+	if !service.ready() || ownerID == uuid.Nil || cardID == uuid.Nil {
+		return RevealedCard{}, ErrCardCredentialsUnavailable
+	}
+	stored, err := service.store.GetPaymentCardByIDAndOwner(ctx, cardID, ownerID)
+	if err != nil || stored.CredentialVersion != 1 {
+		return RevealedCard{}, ErrCardCredentialsUnavailable
+	}
+	pan, cvc := service.deriveCredentials(stored.ID)
+	if !hmac.Equal(stored.PANFingerprint, service.fingerprint("pan:"+pan)) || bcrypt.CompareHashAndPassword([]byte(stored.CVCHash), []byte(cvc)) != nil {
+		return RevealedCard{}, ErrCardCredentialsUnavailable
+	}
+	return RevealedCard{ID: stored.ID, AccountID: stored.AccountID, CardNumber: pan, CVC: cvc, Brand: stored.Brand, Last4: stored.LastFour, ExpMonth: stored.ExpMonth, ExpYear: stored.ExpYear}, nil
 }
 
 func (service *Service) List(ctx context.Context, ownerID uuid.UUID) ([]db.PaymentCard, error) {
@@ -162,6 +179,27 @@ func (service *Service) fingerprint(value string) []byte {
 	mac := hmac.New(sha256.New, service.key)
 	_, _ = mac.Write([]byte(value))
 	return mac.Sum(nil)
+}
+
+func (service *Service) deriveCredentials(cardID uuid.UUID) (string, string) {
+	panMAC := hmac.New(sha256.New, service.key)
+	_, _ = panMAC.Write([]byte("pan:" + cardID.String()))
+	digits := panMAC.Sum(nil)
+	base := make([]byte, 15)
+	base[0] = '4'
+	for index := 1; index < len(base); index++ {
+		base[index] = '0' + digits[index-1]%10
+	}
+	for digit := byte('0'); digit <= '9'; digit++ {
+		candidate := string(base) + string(digit)
+		if validPAN(candidate) {
+			cvcMAC := hmac.New(sha256.New, service.key)
+			_, _ = cvcMAC.Write([]byte("cvc:" + cardID.String()))
+			cvcBytes := cvcMAC.Sum(nil)
+			return candidate, fmt.Sprintf("%03d", (int(cvcBytes[0])<<8|int(cvcBytes[1]))%1000)
+		}
+	}
+	panic("unreachable: Luhn check digit must exist")
 }
 
 func normalizePAN(value string) string {

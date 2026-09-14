@@ -24,6 +24,7 @@ import type {
 	MerchantPaymentIntent,
 	PaymentCard,
 	IssuedPaymentCard,
+	PaymentCardCredentials,
 } from "@/lib/types";
 
 /**
@@ -155,6 +156,11 @@ export async function issueCard(accountId: string): Promise<ApiResponse<IssuedPa
 	});
 }
 
+/** Reveal credentials for an owned, versioned demo card. Never persist the result. */
+export async function getCardCredentials(cardId: string, signal?: AbortSignal): Promise<ApiResponse<PaymentCardCredentials>> {
+	return request<PaymentCardCredentials>(API_ENDPOINTS.CARD_CREDENTIALS(cardId), { signal });
+}
+
 /**
  * Get the current HttpOnly-cookie session
  */
@@ -219,10 +225,11 @@ export async function getAccount(
  */
 export async function createAccount(
   name: string,
+	accountType: "GIROKONTO" | "SPARKONTO" = "GIROKONTO",
 ): Promise<ApiResponse<Account>> {
   return request<Account>(API_ENDPOINTS.ACCOUNTS, {
     method: "POST",
-	body: JSON.stringify({ name, currency: "EUR" }),
+	body: JSON.stringify({ name, account_type: accountType }),
   });
 }
 

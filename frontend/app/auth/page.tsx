@@ -32,7 +32,6 @@ export default function AuthPage() {
 
 	const submit = async (event: React.FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
-		setLoading(true);
 		setMessage("");
 		setSuccess(false);
 		const data = new FormData(event.currentTarget);
@@ -49,6 +48,7 @@ export default function AuthPage() {
 			const nameValidation = plainTextError(fullName, "Vollständiger Name", { required: true, min: 2, max: 100 });
 			if (nameValidation) { setMessage(nameValidation); return; }
 		}
+		setLoading(true);
 		try {
 			if (mode === "forgot") {
 				const result = await forgotPassword(email.trim());
@@ -65,6 +65,14 @@ export default function AuthPage() {
 				const apiError = typeof result.data === "object" && result.data !== null && "error" in result.data
 					? String((result.data as { error: unknown }).error)
 					: "Anmeldung fehlgeschlagen.";
+				if (mode === "register" && apiError === "identity already exists") {
+					setMode("login");
+					setMessage("Diese E-Mail ist bereits registriert. Bitte melde dich mit deinem bestehenden Passwort an.");
+					return;
+				}
+				if (mode === "login" && apiError === "invalid credentials") {
+					throw new Error("E-Mail oder Passwort ist nicht korrekt. Über „Passwort vergessen?“ kannst du ein neues Passwort festlegen.");
+				}
 				throw new Error(apiError);
 			}
 			setAuthenticated(email);

@@ -48,15 +48,44 @@ type ApprovalInput struct {
 
 // Service keeps checkout pricing immutable and uses payment.Service for booking.
 type Service struct {
-	store    *db.Store
-	payments *payment.Service
-	now      func() time.Time
-	ttl      time.Duration
+	store              *db.Store
+	payments           *payment.Service
+	now                func() time.Time
+	ttl                time.Duration
+	completionNotifier CompletionNotifier
 }
 
 // NewService creates the merchant application boundary.
 func NewService(store *db.Store, payments *payment.Service) *Service {
-	return &Service{store: store, payments: payments, now: time.Now, ttl: 30 * time.Minute}
+	return &Service{store: store, payments: payments, now: time.Now, ttl: 30 * time.Minute, completionNotifier: noopCompletionNotifier{}}
+}
+
+// Completion carries immutable persisted facts to the infrastructure webhook adapter.
+type Completion struct {
+	MerchantID        string
+	WebhookURL        string
+	WebhookSecret     string
+	PaymentIntentID   uuid.UUID
+	ProviderPaymentID uuid.UUID
+	MerchantReference string
+	Amount            string
+	Currency          string
+}
+
+// CompletionNotifier is an outbound infrastructure boundary, not payment business logic.
+type CompletionNotifier interface {
+	NotifyCompletion(context.Context, Completion) error
+}
+
+type noopCompletionNotifier struct{}
+
+func (noopCompletionNotifier) NotifyCompletion(context.Context, Completion) error { return nil }
+
+// SetCompletionNotifier installs the process-local transport adapter.
+func (service *Service) SetCompletionNotifier(notifier CompletionNotifier) {
+	if notifier != nil {
+		service.completionNotifier = notifier
+	}
 }
 
 // CreateIntent creates or safely replays a merchant checkout instruction.
@@ -161,5 +190,18 @@ func (service *Service) Approve(ctx context.Context, input ApprovalInput) (db.Me
 	if err = service.store.SetMerchantIntentStatus(ctx, intent.ID, status); err != nil {
 		return db.MerchantPaymentIntent{}, err
 	}
-	return service.GetIntentForCustomer(ctx, input.CustomerID, intent.ID)
+	completed, err := service.GetIntentForCustomer(ctx, input.CustomerID, intent.ID)
+	if err != nil {
+		return db.MerchantPaymentIntent{}, err
+	}
+	if status == StatusBooked {
+		// Booking has committed. A callback failure must never report a booked
+		// payment as failed to the customer; the receiver treats retries idempotently.
+		_ = service.completionNotifier.NotifyCompletion(context.Background(), Completion{
+			MerchantID: completed.MerchantID, WebhookURL: completed.WebhookURL, WebhookSecret: completed.WebhookSecret,
+			PaymentIntentID: completed.ID, ProviderPaymentID: completed.PaymentOrderID.UUID,
+			MerchantReference: completed.MerchantReference, Amount: completed.Amount.StringFixed(2), Currency: completed.Currency,
+		})
+	}
+	return completed, nil
 }

@@ -299,6 +299,18 @@ func main() {
 		seedCancel()
 		zlog.Info().Msg("Fictional demo seed is ready")
 	}
+	webhookURL, webhookSecret := strings.TrimSpace(os.Getenv("ECOMMERCE_WEBHOOK_URL")), strings.TrimSpace(os.Getenv("ECOMMERCE_WEBHOOK_SECRET"))
+	if webhookURL != "" || webhookSecret != "" {
+		if webhookURL == "" || len(webhookSecret) < 32 {
+			zlog.Fatal().Msg("ECOMMERCE_WEBHOOK_URL and a 32-character ECOMMERCE_WEBHOOK_SECRET are required together")
+		}
+		webhookContext, webhookCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if webhookErr := store.ConfigureMerchantWebhook(webhookContext, "pehlione-ecommerce", webhookURL, webhookSecret); webhookErr != nil {
+			webhookCancel()
+			zlog.Fatal().Err(webhookErr).Msg("E-Commerce merchant webhook configuration failed")
+		}
+		webhookCancel()
+	}
 	notificationClient, err := notificationclient.NewFromEnvironment(store)
 	if err != nil {
 		zlog.Fatal().Err(err).Msg("Notification service client configuration is invalid")
@@ -312,6 +324,7 @@ func main() {
 	// Wire HTTP handlers with service and persistence dependencies.
 	h := api.NewHandlerWithPayments(ledgerSvc, paymentSvc, store)
 	h.SetNotificationSender(notificationClient)
+	h.SetMerchantCompletionNotifier(api.NewMerchantWebhookSender())
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -398,6 +411,7 @@ func main() {
 		r.Put("/accounts/{id}", h.UpdateAccount)
 		r.Delete("/accounts/{id}", h.DeleteAccount)
 		r.Get("/cards", h.ListCards)
+		r.Get("/cards/{id}/credentials", h.GetCardCredentials)
 		r.With(paymentRateLimit).Post("/cards", h.IssueCard)
 		r.Post("/transfers", h.Transfer)
 		r.Get("/accounts/{id}/entries", h.GetEntries)

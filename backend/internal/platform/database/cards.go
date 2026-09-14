@@ -12,17 +12,18 @@ import (
 var ErrCardNotFound = errors.New("card resource not found")
 
 type PaymentCard struct {
-	ID             uuid.UUID
-	OwnerID        uuid.UUID
-	AccountID      uuid.UUID
-	PANFingerprint []byte
-	LastFour       string
-	Brand          string
-	ExpMonth       int
-	ExpYear        int
-	CVCHash        string
-	Status         string
-	CreatedAt      time.Time
+	ID                uuid.UUID
+	OwnerID           uuid.UUID
+	AccountID         uuid.UUID
+	PANFingerprint    []byte
+	LastFour          string
+	Brand             string
+	ExpMonth          int
+	ExpYear           int
+	CVCHash           string
+	CredentialVersion int
+	Status            string
+	CreatedAt         time.Time
 }
 
 type MerchantCardToken struct {
@@ -34,17 +35,17 @@ type MerchantCardToken struct {
 
 func (store *Store) CreatePaymentCard(ctx context.Context, card PaymentCard) (PaymentCard, error) {
 	err := store.db.QueryRowContext(ctx, `
-		INSERT INTO payment_cards (owner_id, account_id, pan_fingerprint, last_four, brand, exp_month, exp_year, cvc_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO payment_cards (id, owner_id, account_id, pan_fingerprint, last_four, brand, exp_month, exp_year, cvc_hash, credential_version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at
-	`, card.OwnerID, card.AccountID, card.PANFingerprint, card.LastFour, card.Brand, card.ExpMonth, card.ExpYear, card.CVCHash).
+	`, card.ID, card.OwnerID, card.AccountID, card.PANFingerprint, card.LastFour, card.Brand, card.ExpMonth, card.ExpYear, card.CVCHash, card.CredentialVersion).
 		Scan(&card.ID, &card.CreatedAt)
 	return card, err
 }
 
 func (store *Store) ListPaymentCardsByOwner(ctx context.Context, ownerID uuid.UUID) ([]PaymentCard, error) {
 	rows, err := store.db.QueryContext(ctx, `
-		SELECT id, owner_id, account_id, last_four, brand, exp_month, exp_year, status, created_at
+		SELECT id, owner_id, account_id, last_four, brand, exp_month, exp_year, status, credential_version, created_at
 		FROM payment_cards WHERE owner_id = $1 ORDER BY created_at DESC
 	`, ownerID)
 	if err != nil {
@@ -54,7 +55,7 @@ func (store *Store) ListPaymentCardsByOwner(ctx context.Context, ownerID uuid.UU
 	var cards []PaymentCard
 	for rows.Next() {
 		var card PaymentCard
-		if err := rows.Scan(&card.ID, &card.OwnerID, &card.AccountID, &card.LastFour, &card.Brand, &card.ExpMonth, &card.ExpYear, &card.Status, &card.CreatedAt); err != nil {
+		if err := rows.Scan(&card.ID, &card.OwnerID, &card.AccountID, &card.LastFour, &card.Brand, &card.ExpMonth, &card.ExpYear, &card.Status, &card.CredentialVersion, &card.CreatedAt); err != nil {
 			return nil, err
 		}
 		cards = append(cards, card)
@@ -65,9 +66,22 @@ func (store *Store) ListPaymentCardsByOwner(ctx context.Context, ownerID uuid.UU
 func (store *Store) GetPaymentCardByFingerprint(ctx context.Context, fingerprint []byte) (PaymentCard, error) {
 	var card PaymentCard
 	err := store.db.QueryRowContext(ctx, `
-		SELECT id, owner_id, account_id, pan_fingerprint, last_four, brand, exp_month, exp_year, cvc_hash, status, created_at
+		SELECT id, owner_id, account_id, pan_fingerprint, last_four, brand, exp_month, exp_year, cvc_hash, status, credential_version, created_at
 		FROM payment_cards WHERE pan_fingerprint = $1
-	`, fingerprint).Scan(&card.ID, &card.OwnerID, &card.AccountID, &card.PANFingerprint, &card.LastFour, &card.Brand, &card.ExpMonth, &card.ExpYear, &card.CVCHash, &card.Status, &card.CreatedAt)
+	`, fingerprint).Scan(&card.ID, &card.OwnerID, &card.AccountID, &card.PANFingerprint, &card.LastFour, &card.Brand, &card.ExpMonth, &card.ExpYear, &card.CVCHash, &card.Status, &card.CredentialVersion, &card.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PaymentCard{}, ErrCardNotFound
+	}
+	return card, err
+}
+
+// GetPaymentCardByIDAndOwner keeps card ownership enforcement at the database boundary.
+func (store *Store) GetPaymentCardByIDAndOwner(ctx context.Context, cardID, ownerID uuid.UUID) (PaymentCard, error) {
+	var card PaymentCard
+	err := store.db.QueryRowContext(ctx, `
+		SELECT id, owner_id, account_id, pan_fingerprint, last_four, brand, exp_month, exp_year, cvc_hash, status, credential_version, created_at
+		FROM payment_cards WHERE id = $1 AND owner_id = $2
+	`, cardID, ownerID).Scan(&card.ID, &card.OwnerID, &card.AccountID, &card.PANFingerprint, &card.LastFour, &card.Brand, &card.ExpMonth, &card.ExpYear, &card.CVCHash, &card.Status, &card.CredentialVersion, &card.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentCard{}, ErrCardNotFound
 	}
@@ -87,12 +101,12 @@ func (store *Store) GetCardByMerchantToken(ctx context.Context, merchantID strin
 	var token MerchantCardToken
 	err := store.db.QueryRowContext(ctx, `
 		SELECT t.id, t.merchant_id, t.token_fingerprint,
-		       c.id, c.owner_id, c.account_id, c.pan_fingerprint, c.last_four, c.brand, c.exp_month, c.exp_year, c.cvc_hash, c.status, c.created_at
+		       c.id, c.owner_id, c.account_id, c.pan_fingerprint, c.last_four, c.brand, c.exp_month, c.exp_year, c.cvc_hash, c.status, c.credential_version, c.created_at
 		FROM merchant_card_tokens t JOIN payment_cards c ON c.id = t.card_id
 		WHERE t.merchant_id = $1 AND t.token_fingerprint = $2
 	`, merchantID, fingerprint).Scan(&token.ID, &token.MerchantID, &token.TokenFingerprint,
 		&token.Card.ID, &token.Card.OwnerID, &token.Card.AccountID, &token.Card.PANFingerprint, &token.Card.LastFour, &token.Card.Brand,
-		&token.Card.ExpMonth, &token.Card.ExpYear, &token.Card.CVCHash, &token.Card.Status, &token.Card.CreatedAt)
+		&token.Card.ExpMonth, &token.Card.ExpYear, &token.Card.CVCHash, &token.Card.Status, &token.Card.CredentialVersion, &token.Card.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MerchantCardToken{}, ErrCardNotFound
 	}
